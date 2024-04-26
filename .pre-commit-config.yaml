@@ -3,7 +3,7 @@ repos:
     hooks:
     - id: nbdev_clean # hook id 
       name: nbdev clean # some readable name
-      entry: bash .pre-commit-hooks/run_nbdev_on_staged_files.sh # path to the script
+      entry: .pre-commit-hooks/run_nbdev_on_staged_files.bat # path to the script
       language: system # how to run the script
       types: [jupyter] # what to run it on
       stages: [commit] # when to run it
