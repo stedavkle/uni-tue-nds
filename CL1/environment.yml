@@ -1,0 +1,22 @@
+name: nds_env
+channels:
+  - conda-forge
+dependencies:
+  - python==3.10
+  - pip
+  - pip:
+    - numpy
+    - scipy
+    - pandas
+    - scikit-learn
+    - matplotlib!=3.7.0
+    - seaborn
+    - jupyter
+    - jupyter-black
+    - watermark
+    - statsmodels
+    - igraph
+    - leidenalg
+    - openTSNE
+    - nbdev
+    - pre-commit
