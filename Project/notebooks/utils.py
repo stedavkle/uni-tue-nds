@@ -2,6 +2,7 @@ import oopsi
 import pandas as pd
 import numpy as np
 from scipy import signal, ndimage
+import scipy.special as sp
 from tqdm import tqdm
 import pickle
 from oasis.functions import deconvolve
@@ -370,3 +371,79 @@ def get_epochs_in_range(stim_epoch_table: pd.DataFrame, start: int = 0, end: int
     ]
 
     return other_stimuli_epochs
+
+
+### spike binning
+
+def negloglike_lnp(
+    w: np.array, c: np.array, s: np.array, dt: float = 0.1, R: float = 50
+) -> float:
+    """Implements the negative (!) log-likelihood of the LNP model
+
+    Parameters
+    ----------
+
+    w: np.array, (Dx * Dy, )
+      current receptive field
+
+    c: np.array, (nT, )
+      spike counts
+
+    s: np.array, (Dx * Dy, nT)
+      stimulus matrix
+
+
+    Returns
+    -------
+
+    f: float
+      function value of the negative log likelihood at w
+
+    """
+
+    # ------------------------------------------------
+    # Implement the negative log-likelihood of the LNP
+    # ------------------------------------------------
+
+    # compute dot product of w and s
+    ws = np.dot(w, s)
+    # compute the mean rate in time bins
+    r = np.exp(ws) * dt * R
+
+    # compute the negative log likelihood
+    f = -np.sum(c * np.log(r) - np.log(sp.factorial(c)) - r)
+
+    return f
+
+
+def deriv_negloglike_lnp(
+    w: np.array, c: np.array, s: np.array, dt: float = 0.1, R: float = 50
+) -> np.array:
+    """Implements the gradient of the negative log-likelihood of the LNP model
+
+    Parameters
+    ----------
+
+    see negloglike_lnp
+
+    Returns
+    -------
+
+    df: np.array, (Dx * Dy, )
+      gradient of the negative log likelihood with respect to w
+
+    """
+
+    # --------------------------------------------------------------
+    # Implement the gradient with respect to the receptive field `w`
+    # --------------------------------------------------------------
+
+    # compute dot product of w and s
+    ws = np.dot(w, s)
+    # compute the mean rate in time bins
+    r = np.exp(ws) * dt * R
+    # compute the gradient
+    df = np.dot(s, (r - c))  # switched r and c to match negative log likelihood
+
+    return df
+
