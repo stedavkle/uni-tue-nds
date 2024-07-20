@@ -4,6 +4,8 @@ import numpy as np
 from scipy import signal, ndimage
 from tqdm import tqdm
 import pickle
+from oasis.functions import deconvolve
+from oasis.oasis_methods import oasisAR1, oasisAR2
 
 ### helper functions for accessing data
 
@@ -184,6 +186,51 @@ def oopsi_inference(dff: np.array, dt: float, thresh: int = 0.035, to_file: bool
             pickle.dump(spikes, f)
 
     return spikes
+
+def oasis_inference(dff: np.array, dt: float, thresh: int = 0.035, ar_order: int = 1, to_file: bool = False) -> dict:
+    """
+    Perform spike inference using the OASIS algorithm.
+    
+    Parameters
+    ----------
+    dff: np.array, (n_cells, n_samples)
+        Filtered signal from cells.
+    dt: float
+        Time step between samples.
+    thresh: float
+        Threshold for spike inference. Default 0.035.
+
+    Returns
+    -------
+    spikes: dict
+        {
+            "spikes": np.array, (n_cells, n_samples)    # inferred spikes by oopsi
+            "deconv": np.array, (n_cells, n_samples)    # deconvolved signal
+            "infspikes": np.array, (n_cells, n_samples) # thresholded inferred spikes with {0, 1}
+        }
+        Dictionary containing the inferred spikes for each cell.
+    """
+    spikes = {
+        "spikes": np.zeros(dff.shape),
+        "deconv": np.zeros(dff.shape),
+        "infspikes": np.zeros(dff.shape)
+    }
+    for idxCell in tqdm(range(dff.shape[0])):
+        if ar_order == 1:
+            c, s, b, g, lam = deconvolve(dff[idxCell], penalty=1, optimize_g=5, max_iter=5)
+            c, s = oasisAR1(dff[idxCell].astype(np.float64), g=g, s_min=0.)
+        else:
+            c, s, b, g, lam = deconvolve(dff[idxCell], g=(None, None), penalty=1, optimize_g=5, max_iter=5)
+            c, s = oasisAR2(dff[idxCell].astype(np.float64), g1=g[0], g2=g[1], s_min=0.)
+        spike_train = [1 if value > thresh else 0 for value in c]
+
+        spikes["spikes"][idxCell, :] = s
+        spikes["deconv"][idxCell, :] = c
+        spikes["infspikes"][idxCell, :] = spike_train
+    
+    if to_file:
+        with open("../data/inference_oasis.pkl", "wb") as f:
+            pickle.dump(spikes, f)
 
 # TODO add the other inference methods
 
