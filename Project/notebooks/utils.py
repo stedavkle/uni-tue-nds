@@ -232,6 +232,8 @@ def oasis_inference(dff: np.array, dt: float, thresh: int = 0.035, ar_order: int
         with open("../data/inference_oasis.pkl", "wb") as f:
             pickle.dump(spikes, f)
 
+    return spikes
+
 # TODO add the other inference methods
 
 ### functions for running speed processing
