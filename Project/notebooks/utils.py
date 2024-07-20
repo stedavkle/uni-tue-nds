@@ -76,6 +76,28 @@ def load_inferred_spikes(file_path: str) -> dict:
 
 ### functions for processing
 
+def window_rms(a, window_size):
+    """
+    Apply RMS convolution to a window of the (running speed) signal
+    
+    Parameters
+    ----------
+    x: np.array, (n_samples )
+        Each column in x is one cell.
+    window: float
+        size of the rms window for convolution
+
+    Returns
+    -------
+    y: np.ndarray, (n_samples, n_cells)
+        The smoothed x.
+    """
+    a2 = np.power(a, 2)  # signal quadrieren
+    window = np.ones(window_size) / float(
+        window_size
+    )  # Gewichte für die Convolution festlegen
+    return np.sqrt(np.convolve(a2, window, "same"))
+
 def butter_filter_signal(
     x: np.array, fs: float, low: float, high: float, order: int = 3
 ) -> np.array:
@@ -373,7 +395,7 @@ def get_epochs_in_range(stim_epoch_table: pd.DataFrame, start: int = 0, end: int
     return other_stimuli_epochs
 
 
-### spike binning
+### ML Estimation of RF
 
 def negloglike_lnp(
     w: np.array, c: np.array, s: np.array, dt: float = 0.1, R: float = 50
