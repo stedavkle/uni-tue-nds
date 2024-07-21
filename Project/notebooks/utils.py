@@ -245,7 +245,7 @@ def oasis_inference(dff: np.array, dt: float, thresh: int = 0.035, ar_order: int
         else:
             c, s, b, g, lam = deconvolve(dff[idxCell], g=(None, None), penalty=1, optimize_g=5, max_iter=5)
             c, s = oasisAR2(dff[idxCell].astype(np.float64), g1=g[0], g2=g[1], s_min=0.)
-        spike_train = [1 if value > thresh else 0 for value in c]
+        spike_train = [1 if value > thresh else 0 for value in s]
 
         spikes["spikes"][idxCell, :] = s
         spikes["deconv"][idxCell, :] = c
