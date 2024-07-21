@@ -42,6 +42,40 @@ def get_stimulus(t_idx: int, data: dict) -> np.array:
         return None
     return stimulus
 
+def get_spike_times(spikes: np.array, stim_table: pd.DataFrame, orientation: float = 0.0, frequency: float = 1.0, blank_sweep=False) -> np.array:
+    """
+    Get the spike times for a given orientation and frequency for all cells.
+
+    Parameters
+    ----------
+    spikes: np.array, (n_cells, n_samples)
+        The binary spike times for all cells.
+    stim_table: pd.DataFrame
+        The table containing the start and end time index of each stimulus epoch.
+    orientation: float
+        The orientation of the drifting grating stimulus in degrees.
+    frequency: float
+        The frequency of the drifting grating stimulus in Hz.
+    blank_sweep: bool
+        If True, return the spike times for the blank sweep periods.
+
+    Returns
+    -------
+    spike_times: np.array, (n_cells, n_samples)
+        The spike times for all cells for the given orientation and frequency as a binary array.
+    """
+    # get epochs the stimulus is shown
+    if not blank_sweep:
+        stimulus_epochs = stim_table[(stim_table["orientation"] == orientation) & (stim_table["temporal_frequency"] == frequency)]
+    else:
+        stimulus_epochs = stim_table[stim_table["blank_sweep"] == 1.0]
+
+    # get the spike times for the stimulus epochs
+    spike_times = np.zeros(spikes.shape)
+    for idx, epoch in stimulus_epochs.iterrows():
+        spike_times[:, int(epoch["start"]):int(epoch["end"])] = spikes[:, int(epoch["start"]):int(epoch["end"])]
+    return spike_times
+
 def load_inferred_spikes(file_path: str) -> dict:
     """
     Load the inferred spikes from a file.
@@ -57,7 +91,7 @@ def load_inferred_spikes(file_path: str) -> dict:
         {
             "spikes": np.array, (n_cells, n_samples)    # inferred spikes by oopsi
             "deconv": np.array, (n_cells, n_samples)    # deconvolved signal
-            "infspikes": np.array, (n_cells, n_samples) # thresholded inferred spikes with {0, 1}
+            "binspikes": np.array, (n_cells, n_samples) # thresholded inferred spikes with {0, 1}
         }
         Dictionary containing the inferred spikes for each cell.
     """
@@ -69,13 +103,12 @@ def load_inferred_spikes(file_path: str) -> dict:
     # convert the lists to numpy arrays
     spikes["spikes"] = np.array(spikes["spikes"])
     spikes["deconv"] = np.array(spikes["deconv"])
-    spikes["infspikes"] = np.array(spikes["infspikes"])
+    spikes["binspikes"] = np.array(spikes["binspikes"])
 
     return spikes
 
 
 ### functions for processing
-
 def window_rms(a, window_size):
     """
     Apply RMS convolution to a window of the (running speed) signal
@@ -98,119 +131,7 @@ def window_rms(a, window_size):
     )  # Gewichte für die Convolution festlegen
     return np.sqrt(np.convolve(a2, window, "same"))
 
-def butter_filter_signal(
-    x: np.array, fs: float, low: float, high: float, order: int = 3
-) -> np.array:
-    """
-    Filter raw signal x using a Butterworth filter.
-    
-    Parameters
-    ----------
-    x: np.array, (n_samples, n_cells)
-        Each column in x is one cell.
-    fs: float
-        Sampling frequency.
-    low, high: float, float
-        Passband in Hz for the butterworth filter.
-    order: int
-        The order of the Butterworth filter. Default 3
-
-    Returns
-    -------
-    y: np.array, (n_samples, n_cells)
-    The filtered x. The filter delay is compensated in the output y.
-    """
-
-    y = np.apply_along_axis(
-        lambda col: signal.sosfiltfilt( # apply the filter to all columns
-            signal.butter(              # apply the filter to a column
-                N=order,
-                Wn=[low, high],         # frequency thresholds (normalized)
-                btype="band",           # filter type
-                analog=False,
-                output="sos",           # second-order sections
-            ),
-            col,
-        ),
-        axis=1,
-        arr=x,
-    )
-
-    return y
-
-def wiener_filter_signal(x: np.array, window: float) -> np.array:
-    """
-    Apply Wiener Filter to raw signal x.
-    
-    Parameters
-    ----------
-    x: np.array, (n_samples, n_cells)
-        Each column in x is one cell.
-    window: float
-        size of the wiener filter
-
-    Returns
-    -------
-    y: np.ndarray, (n_samples, n_cells)
-        The filtered x. There is no filter delay as to my knowledge # TODO clarify!
-    """
-
-    y = np.apply_along_axis(
-        lambda col: signal.wiener(  # apply the filter to a column
-            col,
-            mysize=window,          # window of the wiener filter
-        ),
-        axis=1,
-        arr=x,
-    )
-
-    return y
-
-def oopsi_inference(dff: np.array, dt: float, thresh: int = 0.035, to_file: bool = False) -> dict:
-    """
-    Perform spike inference using the OOPSi algorithm.
-    
-    Parameters
-    ----------
-    dff: np.array, (n_cells, n_samples)
-        Filtered signal from cells.
-    dt: float
-        Time step between samples.
-    thresh: float
-        Threshold for spike inference. Default 0.035.
-
-    Returns
-    -------
-    spikes: dict
-        {
-            "spikes": np.array, (n_cells, n_samples)    # inferred spikes by oopsi
-            "deconv": np.array, (n_cells, n_samples)    # deconvolved signal
-            "infspikes": np.array, (n_cells, n_samples) # thresholded inferred spikes with {0, 1}
-        }
-        Dictionary containing the inferred spikes for each cell.
-    """
-
-    spikes = {
-        "spikes": np.zeros(dff.shape),
-        "deconv": np.zeros(dff.shape),
-        "infspikes": np.zeros(dff.shape)
-    }
-    for idxCell in tqdm(range(dff.shape[0])):
-        oopsi_inf = oopsi.fast(dff[idxCell], dt=dt)
-        spike_train = [1 if value > thresh else 0 for value in oopsi_inf[0]]
-
-        # store the results
-        spikes["spikes"][idxCell, :] = oopsi_inf[0]
-        spikes["deconv"][idxCell, :] = oopsi_inf[1]
-        spikes["infspikes"][idxCell, :] = spike_train
-
-    if to_file:
-        with open("../data/inference_oopsi.pkl", "wb") as f:
-            pickle.dump(spikes, f)
-
-    return spikes
-
-def oasis_inference(dff: np.array, dt: float, thresh: int = 0.035, ar_order: int = 1, to_file: bool = False) -> dict:
+def oasis_inference(dff: np.array, optimize_g: int = 3, penalty: int = 0, to_file: bool = False) -> dict:
     """
     Perform spike inference using the OASIS algorithm.
     
@@ -218,10 +139,13 @@ def oasis_inference(dff: np.array, dt: float, thresh: int = 0.035, ar_order: int
     ----------
     dff: np.array, (n_cells, n_samples)
         Filtered signal from cells.
-    dt: float
-        Time step between samples.
-    thresh: float
-        Threshold for spike inference. Default 0.035.
+    optimize_g: int
+        Number of large, isolated events to consider for optimizing g.
+        If optimize_g=0 the estimated g is not further optimized.
+    penalty: int
+        Sparsity penalty. 1: min |dff|_1  0: min |dff|_0
+    to_file: bool
+        If True, save the inferred spikes to a file.
 
     Returns
     -------
@@ -229,33 +153,28 @@ def oasis_inference(dff: np.array, dt: float, thresh: int = 0.035, ar_order: int
         {
             "spikes": np.array, (n_cells, n_samples)    # inferred spikes by oopsi
             "deconv": np.array, (n_cells, n_samples)    # deconvolved signal
-            "infspikes": np.array, (n_cells, n_samples) # thresholded inferred spikes with {0, 1}
+            "binspikes": np.array, (n_cells, n_samples) # thresholded inferred spikes with {0, 1}
         }
         Dictionary containing the inferred spikes for each cell.
     """
-    spikes = {
+    inferred_spikes = {
         "spikes": np.zeros(dff.shape),
         "deconv": np.zeros(dff.shape),
-        "infspikes": np.zeros(dff.shape)
+        "binspikes": np.zeros(dff.shape)
     }
     for idxCell in tqdm(range(dff.shape[0])):
-        if ar_order == 1:
-            c, s, b, g, lam = deconvolve(dff[idxCell], penalty=1, optimize_g=5, max_iter=5)
-            c, s = oasisAR1(dff[idxCell].astype(np.float64), g=g, s_min=0.)
-        else:
-            c, s, b, g, lam = deconvolve(dff[idxCell], g=(None, None), penalty=1, optimize_g=5, max_iter=5)
-            c, s = oasisAR2(dff[idxCell].astype(np.float64), g1=g[0], g2=g[1], s_min=0.)
-        spike_train = [1 if value > thresh else 0 for value in s]
-
-        spikes["spikes"][idxCell, :] = s
-        spikes["deconv"][idxCell, :] = c
-        spikes["infspikes"][idxCell, :] = spike_train
+        deconv_signal, spikes, b, g, lam = deconvolve(dff[idxCell], penalty=1, optimize_g=optimize_g)
+        binary_spikes = [1 if value > 0 else 0 for value in spikes]
+        
+        inferred_spikes["spikes"][idxCell, :] = spikes
+        inferred_spikes["deconv"][idxCell, :] = deconv_signal
+        inferred_spikes["binspikes"][idxCell, :] = binary_spikes
     
     if to_file:
         with open("../data/inference_oasis.pkl", "wb") as f:
-            pickle.dump(spikes, f)
+            pickle.dump(inferred_spikes, f)
 
-    return spikes
+    return inferred_spikes
 
 # TODO add the other inference methods
 
@@ -336,7 +255,7 @@ def get_running_periods_table(running_periods: np.array) -> pd.DataFrame:
 ### Visualization Helper
 def get_epochs_in_range(stim_epoch_table: pd.DataFrame, start: int = 0, end: int = 105967) -> pd.DataFrame:
     """
-    Get the epochs which don't show the locally sparse noise stimulus in a given range.
+    Get the epochs which don't show the drifting_gratings stimulus in a given range.
     
     Parameters
     ----------
@@ -356,7 +275,7 @@ def get_epochs_in_range(stim_epoch_table: pd.DataFrame, start: int = 0, end: int
     # extract all epochs that don't show the locally sparse noise stimulus
     # mark the epochs where the locally sparse noise stimulus is not shown
     other_stimuli_epochs = stim_epoch_table[
-        stim_epoch_table["stimulus"] != "locally_sparse_noise"
+        stim_epoch_table["stimulus"] != "drifting_gratings"
     ].copy()
 
     # if start is smaller than the first epoch start, add interval from start to epoch start
