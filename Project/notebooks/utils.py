@@ -1,6 +1,8 @@
 import oopsi
 import pandas as pd
 import numpy as np
+from scipy.stats import ttest_ind, mannwhitneyu, pearsonr
+import statsmodels.stats.multitest as smm
 from scipy import signal, ndimage
 import scipy.special as sp
 from tqdm import tqdm
@@ -429,6 +431,44 @@ def get_running_periods_table(running_periods: np.array) -> pd.DataFrame:
     running_periods_table = pd.DataFrame({"stimulus": ["running"] * len(start_indices), "start": start_indices, "end": stop_indices})
     return running_periods_table
 
+def analyze_spike_running_correlation(spiketrains, running_period):
+    n_cells, n_measurements = spiketrains.shape
+
+    # Ensure running_period is boolean
+    running_period = running_period.astype(bool)
+
+    # Initialize lists to store results
+    p_values = []
+
+    # Iterate over each cell to perform the statistical test
+    for cell in range(n_cells):
+        # Get spikes for running and non-running periods
+        spikes_running = spiketrains[cell, running_period]
+        spikes_non_running = spiketrains[cell, ~running_period]
+
+        # Calculate the average spike rate during running and non-running periods
+        rate_running = np.mean(spikes_running)
+        rate_non_running = np.mean(spikes_non_running)
+
+        # Perform unpaired statistical test
+        if np.var(spikes_running) == 0 or np.var(spikes_non_running) == 0:
+            # If there's no variation, set p-value to 1.0
+            p_value = 1.0
+        else:
+            # Use independent t-test or Mann-Whitney U test
+            t_stat, p_value = ttest_ind(
+                spikes_running, spikes_non_running, equal_var=False
+            )
+
+        p_values.append(p_value)
+
+    # Apply multiple comparisons correction (Bonferroni)
+    corrected_p_values = smm.multipletests(p_values, method="bonferroni")[1]
+
+    # Identify significant cells
+    significant_cells = np.where(corrected_p_values < 0.05)[0]
+
+    return significant_cells, corrected_p_values
 
 ### Visualization Helper
 def get_epochs_in_range(stim_epoch_table: pd.DataFrame, start: int = 0, end: int = 105967) -> pd.DataFrame:
