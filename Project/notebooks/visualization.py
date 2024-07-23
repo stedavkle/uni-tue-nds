@@ -33,7 +33,10 @@ class Visualization:
         """
         self.inferred_spikes = inferred_spikes
 
-    ### input functions (slider, dropdown, etc.)
+    ################################################################################################
+    ##### input functions (slider, dropdown, etc.)
+    ################################################################################################
+
     def time_interval_slider(self, value: list[float, float]=None, update: bool=False) -> FloatRangeSlider:
         """
         Create a FloatRangeSlider for selecting a time interval.
@@ -104,7 +107,11 @@ class Visualization:
             layout=Layout(width="99%"),
         )
 
-    ### plot update functions
+    ################################################################################################
+    ##### plot update functions
+    ################################################################################################
+
+
     def update_raw_activity_traces_plot(
         self, 
         cellIdx: int, 
@@ -273,7 +280,7 @@ class Visualization:
         plt.tight_layout()
         plt.show()
 
-    def update_stimulus_spike_times(self, cellIdx: int, frequency: int) -> None:
+    def update_stimulus_spike_times(self, cellIdx: int, frequency: int, histogram: bool=False) -> None:
         """
         Plot with the spike times of a cell per orientation and trial.
         """
@@ -286,24 +293,55 @@ class Visualization:
         stimulus_epochs["diff"] = stimulus_epochs["end"] - stimulus_epochs["start"]
         stimulus_epochs = stimulus_epochs.sort_values(by="orientation")
         x_range = stimulus_epochs["diff"].max()
+        #t_range = self.t[x_range] - self.t[0]
         y_range = stimulus_epochs["orientation"].value_counts().max() + 1
+        stimulus_times = np.arange(x_range) * self.dt
+
+        freq_string = (
+            "Independent of Temporal Frequency"
+            if frequency == 0.0
+            else f"Temporal Frequency {frequency} Hz"
+        )
 
         fig, axs = plt.subplots(1, 1, figsize=(10, 6))
         for i, ori in enumerate(self.directions):
             cell_spike_times = self.get_cell_stimulus_spikes_to_one_range(
                 cellIdx, stimulus_epochs[stimulus_epochs["orientation"] == ori]
             )
-            for t, trial in enumerate(cell_spike_times):
-                axs.scatter(
-                    trial[:, 0],
-                    np.zeros_like(trial[:, 1]) + (i * y_range) + t + 0.5,
-                    c="k",
-                    s=2,
-                    marker="|",
+            if histogram:
+                spike_bins = np.zeros(x_range)
+                for trial in cell_spike_times:
+                    bin_idx = trial[:, 0].astype(int)
+                    spike_bins[bin_idx] += 1
+                axs.bar(
+                    np.arange(x_range),
+                    spike_bins,
+                    width=1,
+                    align="edge",
+                    color='k',
+                    bottom=i * y_range
+                )
+                axs.set_xlim(0, x_range-1)
+                axs.set_xticks(np.linspace(0, len(stimulus_times), 9))
+                axs.set_xticklabels(np.arange(0.0, 2.25, step=0.25))
+                axs.set_title(
+                    f"Spike Density of Cell {cellIdx} per Orientation - {freq_string}"
+                )
+            else:
+                for t, trial in enumerate(cell_spike_times):
+                    axs.scatter(
+                        stimulus_times[trial[:, 0].astype(int)],
+                        np.zeros_like(trial[:, 1]) + (i * y_range) + t + 0.5,
+                        c="k",
+                        s=2,
+                        marker="|",
+                    )
+                # x-axis
+                axs.set_xlim(-0.01, 2.0)
+                axs.set_title(
+                    f"Spike Times of Cell {cellIdx} per Orientation and Trial - {freq_string}"
                 )
 
-        # x-axis
-        axs.set_xlim(-0.01, 2.0)
         axs.set_xlabel("Time [s]")
 
         # y-axis
@@ -316,14 +354,6 @@ class Visualization:
                 tick_label.get_transform()
                 + transforms.ScaledTranslation(0, 0.3, fig.dpi_scale_trans)
             )
-        freq_string = (
-            "Independent of Temporal Frequency"
-            if frequency == 0.0
-            else f"Temporal Frequency {frequency} Hz"
-        )
-        axs.set_title(
-            f"Spike Times of Cell {cellIdx} per Orientation and Trial - {freq_string}"
-        )
         axs.grid(axis="y", alpha=0.5)
         plt.show()
 
@@ -398,8 +428,86 @@ class Visualization:
         ax.set_xticks(ticks=x, labels=self.frequencies)
         plt.legend()
 
-    ### static plot functions
+    def update_temporal_tuning_curve(self, cellIdx: int, tuning_curve_fit: dict) -> None:
+        fitted_curves = tuning_curve_fit[cellIdx]["fitted_curves"]
+        mean_spike_counts = tuning_curve_fit[cellIdx]["mean_spike_counts"]
+        std_counts = tuning_curve_fit[cellIdx]["std_spike_counts"]
+        fig, ax = plt.subplots(figsize=(7, 5))
+        # Plot average spike count per direction
+        ax.plot(
+            self.directions,
+            mean_spike_counts,
+            label="Mean Spike Count",
+            color="orange",
+            linewidth=2,
+            alpha=0.7,
+        )
+        # Plot the standard deviation
+        ax.fill_between(
+            self.directions,
+            mean_spike_counts - std_counts,
+            mean_spike_counts + std_counts,
+            alpha=0.1,
+            color="orange",
+        )
+        # Plot fitted tuning curves for each temporal frequency
+        [
+            ax.plot(
+                self.directions,
+                fitted_curves[i, :],
+                label=f"T {self.frequencies[i]} [Hz]",
+                linestyle="--",
+            )
+            for i in range(len(self.frequencies))
+        ]
+        # get the two directions with the maximum at all fitted curves
+        max_curve_idx_for_all_directions = np.argmax(fitted_curves, axis=0)
+        max_direction_idx = np.argmax(np.max(fitted_curves, axis=0))
+        ax.plot(
+            self.directions[max_direction_idx],
+            fitted_curves[
+                max_curve_idx_for_all_directions[max_direction_idx], max_direction_idx
+            ],
+            "ro",
+            label="Preferred Orientation",
+        )
+        # remove the maximum direction from the list and get the second maximum
+        fitted_curves[max_curve_idx_for_all_directions[max_direction_idx]][max_direction_idx] = 0
+        max_direction_idx = np.argmax(np.max(fitted_curves[max_curve_idx_for_all_directions], axis=0))
+        ax.plot(
+            self.directions[max_direction_idx],
+            fitted_curves[
+                max_curve_idx_for_all_directions[max_direction_idx], max_direction_idx
+            ],
+            "ro",
+        )
+        ax.set_xticks(np.arange(0, 316, 45))
+        ax.set_xlim(-1, 316)
+        ax.set_ylim(0, np.max(mean_spike_counts + std_counts) + 3)
+        ax.set_xlabel("Direction [°]")
+        ax.set_ylabel("Spike Count")
+        ax.set_title("Tuning Curve Fit of Cell {}".format(cellIdx))
+        ax.legend()
+        plt.show()
+
+    ################################################################################################
+    ##### static plot functions
+    ################################################################################################
     def color_roi(self, data: np.array, title: str, is_binary: bool = False) -> None:
+        """
+        Plot the colored ROI masks.
+
+        Parameters
+        ----------
+        data: np.array -> (2, n_cells) if is_binary else (n_cells,)
+            The data to color the ROI masks. 
+            If is_binary is True, the data should be binary values (0 or 1) for each cell.
+            If is_binary is False, the data should be the orientation of the drifting grating stimulus in degrees.
+        title: str
+            The title of the plot.
+        is_binary: bool, optional
+            If True, the data is binary values (0 or 1) for each cell, by default False.
+        """
         if is_binary:
             altered_roi_masks = np.zeros(self.roi_masks.shape, dtype="int")
             for c in range(len(data)):
@@ -483,10 +591,44 @@ class Visualization:
         plt.legend()
         plt.show()
 
-    def running_activity_correlation(self):
-        pass
+    def plot_tuning_orientation_test(
+        cellIdx: int, qp_results: dict, qdistr: np.ndarray, direction: bool = False
+    ) -> None:
+        freq_strings = self.frequencies.copy()
+        freq_strings.append(-1)
+        fig, axs = plt.subplots(2, 3, figsize=(10, 6))
 
-    ### Helper functions
+        for i, ax in enumerate(axs.flatten()):
+            tf = freq_strings[i]
+            q = qp_results[cellIdx][tf]["q"]
+
+            ax.hist(
+                qdistr[cellIdx, i, :],
+                bins=30,
+                color="skyblue",
+                edgecolor="black",
+                alpha=0.7,
+            )
+            ax.axvline(q, color="red", linestyle="--", label=f"Observed |q| = {q:.2f}")
+            if tf == -1:
+                ax.set_title("All Temporal Frequencies")
+            else:
+                ax.set_title(f"Temporal Frequency: {tf} Hz")
+            ax.set_xlim(left=0)
+            ax.legend(loc="upper right")
+        for i in range(2):
+            axs[i, 0].set_ylabel("Frequency")
+        for i in range(3):
+            axs[1, i].set_xlabel("|q| Values")
+        oridir_string = "Direction" if direction else "Orientation"
+        plt.suptitle(f"Permutation Test {oridir_string} Tuning of Neuron {cellIdx}")
+        plt.tight_layout()
+        plt.show()
+
+    ################################################################################################
+    ##### Helper functions
+    ################################################################################################
+    
     def get_epochs_stimulus_shown(self, start: int, end: int) -> pd.DataFrame:
         if start < 0:
             start = 0
@@ -525,7 +667,7 @@ class Visualization:
         spike_times: list[np.array]
             List of spike times for each stimulus epoch (trial).
             np.array, (n_spikes, 2)
-            spike_times[:, 0] contains the time of the spikes in seconds
+            spike_times[:, 0] contains the time index of the spikes
             spike_times[:, 1] contains the intensity of the spikes
         """
         if self.inferred_spikes is None:
@@ -533,7 +675,7 @@ class Visualization:
         
         # time frame the spikes are mapped to
         time_range = max(stimulus_epochs["end"] - stimulus_epochs["start"])
-        time_frame = self.t[:time_range] - self.t[0]
+        time_frame = np.arange(time_range)
 
         # iterate over the epochs the stimulus is shown
         spike_times = []
@@ -543,7 +685,7 @@ class Visualization:
             cell_spikes = self.inferred_spikes["spikes"][cellIdx, start:end]
             idx_cell_spikes = np.where(cell_spikes > 0)[0]
             cell_spike_times = np.zeros((len(idx_cell_spikes), 2))
-            cell_spike_times[:, 0] = time_frame[idx_cell_spikes]
+            cell_spike_times[:, 0] = idx_cell_spikes #time_frame[idx_cell_spikes]
             cell_spike_times[:, 1] = cell_spikes[idx_cell_spikes]
             spike_times.append(cell_spike_times)
         return spike_times
