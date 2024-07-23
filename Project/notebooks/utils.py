@@ -904,7 +904,7 @@ def testTuningFunction_opt(
                 )
                 qdistr[neuron, tf, i] = np.abs(np.dot(shuffled_m_k, v_k))
 
-            p = np.sum(qdistr >= q) / niters
+            p = np.sum(qdistr[neuron, tf, :] >= q) / niters
             result[neuron][temporal_frequency] = {
                 "p": p,
                 "q": q,
