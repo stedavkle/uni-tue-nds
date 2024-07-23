@@ -843,6 +843,88 @@ def testTuningFunction(
             }
     return result
 
+def testTuningFunction_opt(
+    inferred_spikes: np.ndarray,
+    stim_table=pd.DataFrame(),
+    psi: int = 1,
+    niters: int = 1000,
+    random_seed: int = 2046,
+    to_file: bool = True,
+) -> [dict, np.ndarray]:
+    starts = stim_table["start"].astype(int).to_numpy()
+    ends = stim_table["end"].astype(int).to_numpy()
+
+    dirs = stim_table["orientation"].dropna()
+    unique_directions = np.unique(dirs).astype(int)
+    unique_directions.sort()
+    theta_k = np.deg2rad(np.unique(unique_directions))
+
+    temporal_frequencies = stim_table["temporal_frequency"].dropna()
+    unique_temporal_frequencies = np.unique(temporal_frequencies).astype(int)
+    unique_temporal_frequencies.sort()
+
+    qdistr = np.zeros((inferred_spikes["binspikes"].shape[0], len(unique_temporal_frequencies)+1, niters))
+    result = {}
+    for neuron in tqdm(range(inferred_spikes["binspikes"].shape[0])):
+        result[neuron] = {}
+        # Vectorized calculation of spike counts
+        # TODO ist das nicht die bin_spike_counts Funktion?
+        spike_counts = np.array(
+            [
+                np.sum(inferred_spikes["binspikes"][neuron, start:end])
+                for start, end in zip(starts, ends)
+            ]
+        )
+        spike_counts = spike_counts[stim_table["orientation"].dropna().index]
+
+        for tf, temporal_frequency in enumerate(
+            np.concatenate((unique_temporal_frequencies, [-1]))
+        ):
+            m_k = np.array(
+                [
+                    np.mean(
+                        spike_counts[temporal_frequencies == temporal_frequency][
+                            dirs[temporal_frequencies == temporal_frequency] == d
+                        ]
+                        if temporal_frequency != -1
+                        else spike_counts[dirs == d]
+                    )
+                    for d in unique_directions
+                ]
+            )
+            v_k = np.exp(psi * 1j * theta_k)
+            q = np.abs(np.dot(m_k, v_k))
+
+            rng = np.random.default_rng(random_seed)
+
+            for i in range(niters):
+                shuffled_counts = rng.permutation(spike_counts)
+                shuffled_m_k = np.array(
+                    [np.mean(shuffled_counts[dirs == d]) for d in unique_directions]
+                )
+                qdistr[neuron, tf, i] = np.abs(np.dot(shuffled_m_k, v_k))
+
+            p = np.sum(qdistr >= q) / niters
+            result[neuron][temporal_frequency] = {
+                "p": p,
+                "q": q,
+            }
+    if to_file:
+        file_string = "or" if psi == 2 else "dir"
+        with open(f"../data/qp_tuning_test_{file_string}.pkl", "wb") as f:
+            pickle.dump(result, f)
+        with open(f"../data/qdistr_tuning_test_{file_string}.pkl", "wb") as f:
+            pickle.dump(qdistr, f)
+    return result, qdistr
+
+def load_tuning_test_results(orientation: bool = True):
+    file_string = "or" if orientation else "dir"
+    with open(f"../data/qp_tuning_test_{file_string}.pkl", "rb") as f:
+        result = pickle.load(f)
+    with open(f"../data/qdistr_tuning_test_{file_string}.pkl", "rb") as f:
+        qdistr = pickle.load(f)
+    return result, np.array(qdistr)
+
 # asses temporal frequency:
 def bin_spike_counts(stim_table, spikes, neuron):
     spike_count = np.zeros(len(stim_table["start"]))
