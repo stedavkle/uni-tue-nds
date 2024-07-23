@@ -409,26 +409,27 @@ class Visualization:
 
     def update_temporal_tuning_curve(self, cellIdx: int, temporal_tunings: np.array) -> None:
         x = np.arange(temporal_tunings.shape[2])
-        
-        temporal_tuning_mean = temporal_tunings[0, neuron_index, :]
-        temporal_tuning_sd = temporal_tunings[1, neuron_index, :]
-        
-        fig, ax = plt.subplots(figsize=(5, 5))
+
+        temporal_tuning_mean = temporal_tunings[0, cellIdx, :]
+        temporal_tuning_sd = temporal_tunings[1, cellIdx, :]
+
+        fig, ax = plt.subplots(figsize=(5, 4))
         ax.errorbar(
             x,
-            temporal_tuning_mean, 
+            temporal_tuning_mean,
             yerr=temporal_tuning_sd,
             fmt="o",
             capsize=5,
+            color="blue",
         )
         # TODO x und y lim
-        ax.title(f"Temporal Tuning of Cell {cellIdx}")
+        ax.set_title(f"Temporal Tuning of Cell {cellIdx}")
         ax.set_xlabel("Temporal Frequency [Hz]")
-        ax.set_ylabel("Mean Value")
+        ax.set_ylabel("Mean Value")  # TODO passt dieses label?
         ax.set_xticks(ticks=x, labels=self.frequencies)
-        plt.legend()
+        plt.show()
 
-    def update_temporal_tuning_curve(self, cellIdx: int, tuning_curve_fit: dict) -> None:
+    def update_directional_tuning_curve(self, cellIdx: int, tuning_curve_fit: dict) -> None:
         fitted_curves = tuning_curve_fit[cellIdx]["fitted_curves"]
         mean_spike_counts = tuning_curve_fit[cellIdx]["mean_spike_counts"]
         std_counts = tuning_curve_fit[cellIdx]["std_spike_counts"]
@@ -500,46 +501,52 @@ class Visualization:
         Parameters
         ----------
         data: np.array -> (2, n_cells) if is_binary else (n_cells,)
-            The data to color the ROI masks. 
+            The data to color the ROI masks.
             If is_binary is True, the data should be binary values (0 or 1) for each cell.
+                data[0, :] significant cells (0: not significant, 1: significant)
+                data[1, :] single and complex cells (0: simple, 1: complex)
             If is_binary is False, the data should be the orientation of the drifting grating stimulus in degrees.
         title: str
             The title of the plot.
         is_binary: bool, optional
             If True, the data is binary values (0 or 1) for each cell, by default False.
         """
+
+        tab_cmap = plt.get_cmap("tab20")
         if is_binary:
-            altered_roi_masks = np.zeros(self.roi_masks.shape, dtype="int")
-            for c in range(len(data)):
+            tab_idx = [0, 1, 15, 7, 6]
+            colors = [tab_cmap(i) for i in tab_idx]
+            mask = np.zeros(self.roi_masks[0].shape, dtype="int")
+            for c in range(data.shape[1]):
                 cell_roi = self.roi_masks[c, :, :].astype("int")
-                if data[c] == 0:
+                # set roi cells to 1 or -1 depending on significance
+                if data[0, c] == 0:
                     cell_roi *= -1
-                altered_roi_masks[c, :, :] = cell_roi
-            mask = np.sum(altered_roi_masks, axis=0)
-            mask[mask > 1] = 1
-            mask[mask < -1] = -1
-            mask = (mask + 1) / 2
-            colors = ["blue", "lightgray", "red"]
-            bounds = [0, 0.25, 0.75, 1]
+                # set roi cells to (-)2 if cell is complex
+                if data[1, c] == 1:
+                    cell_roi *= 2
+                mask = np.where(mask == 0, cell_roi, mask)
+            bounds = [-2.5, -1.5, -0.5, 0.5, 1.5, 2.5]
             legend_patches = [
-                mpatches.Patch(color="blue", label="Simple Cell"),
-                mpatches.Patch(color="red", label="Complex Cell"),
+                mpatches.Patch(color=colors[0], label="Not Significant - Complex Cell"),
+                mpatches.Patch(color=colors[1], label="Not Significant - Single Cell"),
+                mpatches.Patch(color=colors[3], label="Significant - Single Cell"),
+                mpatches.Patch(color=colors[4], label="Significant - Complex Cell"),
             ]
         else:
-            paired_cmap = plt.get_cmap("Paired")
-            paired_idx = [0, 4, 6, 8, 1, 5, 7, 9]
-            colors = ["lightgray"]
-            for i in paired_idx:
-                colors.append(paired_cmap(i))
+            tab_idx = [15, 1, 3, 7, 9, 0, 2, 6, 8]
+            colors = [tab_cmap(i) for i in tab_idx]
             bounds = [-1.5, -0.5, 22.5, 67.5, 112.5, 157.5, 202.5, 247.5, 292.5, 337.5]
-            mask = np.ones(self.roi_masks[0].shape, dtype="int") * -1
+            mask = np.ones(self.roi_masks[0].shape, dtype="float") * -1
             for c in range(len(data)):
-                cell_roi = self.roi_masks[c, :, :].astype("int")
-                cell_roi *= data[c]
+                cell_roi = self.roi_masks[c, :, :].astype("float")
+                cell_roi *= float(data[c])
+                # set all zeros to -1
+                cell_roi = np.where(cell_roi == 0, -1, cell_roi)
                 # apply corresponding value of cell_roi to mask where cell_roi is not 0.
-                mask[cell_roi != 0] = cell_roi[cell_roi != 0]
+                mask = np.where(mask == -1.0, cell_roi, mask)
             legend_patches = [
-                mpatches.Patch(color=paired_cmap(i), label=f"{self.directions[i]}°")
+                mpatches.Patch(color=tab_cmap(tab_idx[i + 1]), label=f"{self.directions[i]}°")
                 for i in range(len(self.directions))
             ]
 
@@ -592,7 +599,7 @@ class Visualization:
         plt.show()
 
     def plot_tuning_orientation_test(
-        cellIdx: int, qp_results: dict, qdistr: np.ndarray, direction: bool = False
+        self, cellIdx: int, qp_results: dict, qdistr: np.ndarray, direction: bool = False
     ) -> None:
         freq_strings = self.frequencies.copy()
         freq_strings.append(-1)
