@@ -773,7 +773,7 @@ def getMaxOfTemporalTuningCurves(
             "max_direction2": unique_dirs[max_direction_idx2],
             "is_orientationnal": is_orientational,
         }
-        break
+        
     return results
 
 def testTuningFunction(
