@@ -407,29 +407,29 @@ class Visualization:
         )
         plt.show()
 
-    def update_temporal_tuning_curve(self, cellIdx: int, temporal_tunings: np.array) -> None:
-        x = np.arange(temporal_tunings.shape[2])
+    # def update_temporal_tuning_curve(self, cellIdx: int, temporal_tunings: np.array) -> None:
+    #     x = np.arange(temporal_tunings.shape[2])
         
-        temporal_tuning_mean = temporal_tunings[0, neuron_index, :]
-        temporal_tuning_sd = temporal_tunings[1, neuron_index, :]
+    #     temporal_tuning_mean = temporal_tunings[0, neuron_index, :]
+    #     temporal_tuning_sd = temporal_tunings[1, neuron_index, :]
         
-        fig, ax = plt.subplots(figsize=(5, 5))
-        ax.errorbar(
-            x,
-            temporal_tuning_mean, 
-            yerr=temporal_tuning_sd,
-            fmt="o",
-            capsize=5,
-        )
-        # TODO x und y lim
-        ax.title(f"Temporal Tuning of Cell {cellIdx}")
-        ax.set_xlabel("Temporal Frequency [Hz]")
-        ax.set_ylabel("Mean Value")
-        ax.set_xticks(ticks=x, labels=self.frequencies)
-        plt.legend()
+    #     fig, ax = plt.subplots(figsize=(5, 5))
+    #     ax.errorbar(
+    #         x,
+    #         temporal_tuning_mean, 
+    #         yerr=temporal_tuning_sd,
+    #         fmt="o",
+    #         capsize=5,
+    #     )
+    #     # TODO x und y lim
+    #     ax.title(f"Temporal Tuning of Cell {cellIdx}")
+    #     ax.set_xlabel("Temporal Frequency [Hz]")
+    #     ax.set_ylabel("Mean Value")
+    #     ax.set_xticks(ticks=x, labels=self.frequencies)
+    #     plt.legend()
 
     def update_temporal_tuning_curve(self, cellIdx: int, tuning_curve_fit: dict) -> None:
-        fitted_curves = tuning_curve_fit[cellIdx]["fitted_curves"]
+        fitted_curves = tuning_curve_fit[cellIdx]["fitted_curves"].copy()
         mean_spike_counts = tuning_curve_fit[cellIdx]["mean_spike_counts"]
         std_counts = tuning_curve_fit[cellIdx]["std_spike_counts"]
         fig, ax = plt.subplots(figsize=(7, 5))
