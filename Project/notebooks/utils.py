@@ -732,7 +732,7 @@ def getMaxOfTemporalTuningCurves(
     unique_temps.sort()
     results = {}
     for neuron in tuning_curve_fit.keys():
-        fitted_curves = tuning_curve_fit[neuron]["fitted_curves"]
+        fitted_curves = tuning_curve_fit[neuron]["fitted_curves"].copy()
         max_curve_idx_for_all_directions = np.argmax(fitted_curves, axis=0)
         max_direction_idx = np.argmax(np.max(fitted_curves, axis=0))
 
