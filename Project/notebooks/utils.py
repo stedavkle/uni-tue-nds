@@ -2,6 +2,7 @@ import oopsi
 import pandas as pd
 import numpy as np
 from scipy.stats import ttest_ind, mannwhitneyu, pearsonr
+from scipy.optimize import curve_fit
 import statsmodels.stats.multitest as smm
 from scipy import signal, ndimage
 import scipy.special as sp
@@ -605,3 +606,249 @@ def deriv_negloglike_lnp(
 
     return df
 
+def vonMises(theta: np.ndarray, alpha: float, kappa: float, mu: float, phi: float) -> np.ndarray:
+    """Evaluate the parametric von Mises tuning curve with parameters p at locations theta.
+
+    Parameters
+    ----------
+
+    theta: np.array, shape=(N, )
+        Locations. The input unit is degree.
+
+    alpha, kappa, mu, phi : float
+        Function parameters
+
+    Return
+    ------
+    f: np.array, shape=(N, )
+        Tuning curve.
+    """
+
+    # Convert theta to radians
+    theta_rad = np.deg2rad(theta)
+    phi_rad = np.deg2rad(phi)
+
+    f = np.exp(
+        alpha
+        + kappa * (np.cos(2 * (theta_rad - phi_rad)) - 1)
+        + mu * (np.cos(theta_rad - phi_rad) - 1)
+    )
+    return f
+
+def fitTemporalTuningCurve(
+    inferred_spikes: np.ndarray,
+    stim_table=pd.DataFrame(),
+) -> dict:
+    """Fit a von Mises tuning curve to the spike counts in count with direction dir using a least-squares fit.
+    Parameters
+    ----------
+    inferred_spikes: np.array, shape=(n_neurons, n_timepoints)
+
+    stim_table: pd.DataFrame
+        DataFrame containing the stimulus information
+
+    neuron: int, default=0
+
+    Return
+    ------
+    fitted_curves: np.array, shape=(n_temporal_frequencies, n_directions)
+        Fitted tuning curves for each temporal frequency
+
+    mean_spike_counts: np.array, shape=(n_directions,)
+        Mean spike counts per direction
+
+    std_spike_counts: np.array, shape=(n_directions,)
+        Standard deviation of spike counts per direction
+    """
+    result = {}
+
+    starts = stim_table["start"].astype(int).to_numpy()
+    ends = stim_table["end"].astype(int).to_numpy()
+
+    dirs = stim_table["orientation"].dropna()
+    unique_directions = np.unique(dirs).astype(int)
+    unique_directions.sort()
+
+    temporal_frequencies = stim_table["temporal_frequency"].dropna()
+    unique_temporal_frequencies = np.unique(temporal_frequencies).astype(int)
+    unique_temporal_frequencies.sort()
+
+    for neuron in tqdm(range(inferred_spikes["binspikes"].shape[0])):
+        # Vectorized calculation of spike counts
+        spike_counts = np.array(
+            [
+                np.sum(inferred_spikes["binspikes"][neuron, start:end])
+                for start, end in zip(starts, ends)
+            ]
+        )
+        spike_counts = spike_counts[stim_table["orientation"].dropna().index]
+        initial_guess = [np.mean(spike_counts), 1, 1, np.median(dirs)]
+
+        curves_temporal_frequencies = np.zeros(
+            (len(unique_temporal_frequencies), len(initial_guess))
+        )
+        fitted_curves = np.zeros(
+            (len(unique_temporal_frequencies), len(unique_directions))
+        )
+        mean_spike_counts = np.array(
+            [np.mean(spike_counts[dirs == d]) for d in unique_directions]
+        )
+        std_spike_counts = np.array(
+            [np.std(spike_counts[dirs == d]) for d in unique_directions]
+        )
+
+        for i, temporal_frequency in enumerate(unique_temporal_frequencies):
+            # Perform the non-linear least squares fit
+            bounds = (
+                [-np.inf, -np.inf, -np.inf, -np.inf],
+                [np.inf, np.inf, np.inf, 360],
+            )
+            popt, _ = curve_fit(
+                vonMises,
+                dirs[temporal_frequencies == temporal_frequency],
+                spike_counts[temporal_frequencies == temporal_frequency],
+                p0=initial_guess,
+                bounds=bounds,
+                maxfev=5000,
+            )
+            curves_temporal_frequencies[i, :] = popt
+
+            fitted_curves[i, :] = vonMises(unique_directions, *popt)
+
+        result[neuron] = {
+            "fitted_curves": fitted_curves,
+            "mean_spike_counts": mean_spike_counts,
+            "std_spike_counts": std_spike_counts,
+        }
+    return result
+
+def getMaxOfTemporalTuningCurves(
+    tuning_curve_fit: dict,
+    stim_table,
+):
+    unique_dirs = np.unique(stim_table["orientation"].dropna())
+    unique_dirs.sort()
+    unique_temps = np.unique(stim_table["temporal_frequency"].dropna())
+    unique_temps.sort()
+    results = {}
+    for neuron in tuning_curve_fit.keys():
+        fitted_curves = tuning_curve_fit[neuron]["fitted_curves"]
+        max_curve_idx_for_all_directions = np.argmax(fitted_curves, axis=0)
+        max_direction_idx = np.argmax(np.max(fitted_curves, axis=0))
+
+        # print(
+        #     max_curve_idx_for_all_directions,
+        #     np.max(fitted_curves, axis=0),
+        #     max_direction_idx,
+        # )
+        # print(
+        #     tuning_curve_fit[neuron]["fitted_curves"][
+        #         max_curve_idx_for_all_directions[max_direction_idx]
+        #     ]
+        # )
+
+        # remove the maximum direction from the list and get the second maximum
+        fitted_curves[
+            max_curve_idx_for_all_directions[max_direction_idx], max_direction_idx
+        ] = 0
+        # print(
+        #     tuning_curve_fit[neuron]["fitted_curves"][
+        #         max_curve_idx_for_all_directions[max_direction_idx]
+        #     ]
+        # )
+        max_direction_idx2 = np.argmax(
+            tuning_curve_fit[neuron]["fitted_curves"][
+                max_curve_idx_for_all_directions[max_direction_idx]
+            ]
+        )
+
+        is_orientational = (
+            1
+            if (unique_dirs[max_direction_idx] + 180) % 360
+            == unique_dirs[max_direction_idx2]
+            else 0
+        )
+        results[neuron] = {
+            "max_direction": unique_dirs[max_direction_idx],
+            "max_direction2": unique_dirs[max_direction_idx2],
+            "is_orientationnal": is_orientational,
+        }
+        break
+    return results
+
+def testTuningFunction(
+    inferred_spikes: np.ndarray,
+    stim_table=pd.DataFrame(),
+    psi: int = 1,
+    niters: int = 1000,
+    random_seed: int = 2046,
+):
+    starts = stim_table["start"].astype(int).to_numpy()
+    ends = stim_table["end"].astype(int).to_numpy()
+
+    dirs = stim_table["orientation"].dropna()
+    unique_directions = np.unique(dirs).astype(int)
+    unique_directions.sort()
+    theta_k = np.deg2rad(np.unique(unique_directions))
+
+    temporal_frequencies = stim_table["temporal_frequency"].dropna()
+    unique_temporal_frequencies = np.unique(temporal_frequencies).astype(int)
+    unique_temporal_frequencies.sort()
+
+    result = {}
+    for neuron in tqdm(range(inferred_spikes["binspikes"].shape[0])):
+        result[neuron] = {}
+        # Vectorized calculation of spike counts
+        spike_counts = np.array(
+            [
+                np.sum(inferred_spikes["binspikes"][neuron, start:end])
+                for start, end in zip(starts, ends)
+            ]
+        )
+        spike_counts = spike_counts[stim_table["orientation"].dropna().index]
+
+        for i, temporal_frequency in enumerate(
+            np.concatenate((unique_temporal_frequencies, [-1]))
+        ):
+            m_k = np.array(
+                [
+                    np.mean(
+                        spike_counts[temporal_frequencies == temporal_frequency][
+                            dirs[temporal_frequencies == temporal_frequency] == d
+                        ]
+                        if temporal_frequency != -1
+                        else spike_counts[dirs == d]
+                    )
+                    for d in unique_directions
+                ]
+            )
+            v_k = np.exp(psi * 1j * theta_k)
+            q = np.abs(np.dot(m_k, v_k))
+
+            rng = np.random.default_rng(random_seed)
+            qdistr = np.zeros(niters)
+
+            for i in range(niters):
+                shuffled_counts = rng.permutation(spike_counts)
+                shuffled_m_k = np.array(
+                    [np.mean(shuffled_counts[dirs == d]) for d in unique_directions]
+                )
+                qdistr[i] = np.abs(np.dot(shuffled_m_k, v_k))
+
+            p = np.sum(qdistr >= q) / niters
+            result[neuron][temporal_frequency] = {
+                "p": p,
+                "q": q,
+                "qdistr": qdistr,
+            }
+    return result
+
+# asses temporal frequency:
+def bin_spike_counts(stim_table, spikes, neuron):
+    spike_count = np.zeros(len(stim_table["start"]))
+    for i in range(len(stim_table)):
+        start = stim_table["start"][i].astype(int)
+        end = stim_table["end"][i].astype(int)
+        spike_count[i] = np.sum(spikes["binspikes"][neuron, start:end])
+
+    return spike_count
