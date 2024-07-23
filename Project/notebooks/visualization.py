@@ -1,4 +1,4 @@
-from ipywidgets import IntSlider, FloatRangeSlider, Checkbox, Layout, interact
+from ipywidgets import IntSlider, FloatRangeSlider, Checkbox, Layout, interact, Dropdown
 import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
@@ -20,8 +20,18 @@ class Visualization:
         self.stim_table["end"] = self.stim_table["end"].astype(int)
         self.fs = 1 / np.mean(np.diff(self.t))
         self.dt = 1 / self.fs
-        self.directions = self.stim_table["orientation"].unique().tolist()
+        self.directions = self.stim_table["orientation"].dropna().unique().tolist()
         self.directions.sort()
+        self.frequencies = self.stim_table["temporal_frequency"].dropna().unique().tolist()
+        self.frequencies.sort()
+        self.inferred_spikes = None
+
+    def set_inferred_spikes(self, inferred_spikes: dict) -> None:
+        """ 
+        Set the processed spikes data, used in functions:
+            - update_stimulus_spike_times
+        """
+        self.inferred_spikes = inferred_spikes
 
     ### input functions (slider, dropdown, etc.)
     def time_interval_slider(self, value: list[float, float]=None, update: bool=False) -> FloatRangeSlider:
@@ -78,6 +88,20 @@ class Visualization:
             description=description,  # Checkbox label
             indent=True, 
             layout=Layout(width="99%"),  # Adjust the layout width
+        )
+
+    def frequency_dropdown(self, value: float=0.0) -> Dropdown:
+        """
+        Create a Dropdown for selecting a frequency.
+        """
+        frequencies = [('All Frequencies', 0.0)]
+        frequencies.extend([(f"{f} Hz", f) for f in self.frequencies])
+        return Dropdown(
+            options=frequencies,
+            value=value,
+            description="Temporal Frequency:",
+            disabled=False,
+            layout=Layout(width="99%"),
         )
 
     ### plot update functions
@@ -249,6 +273,110 @@ class Visualization:
         plt.tight_layout()
         plt.show()
 
+    def update_stimulus_spike_times(self, cellIdx: int, frequency: int) -> None:
+        """
+        Plot with the spike times of a cell per orientation and trial.
+        """
+        if frequency == 0.0:
+            stimulus_epochs = self.stim_table[self.stim_table["blank_sweep"] == 0.0].copy()
+        else:
+            stimulus_epochs = self.stim_table[
+                self.stim_table["temporal_frequency"] == frequency
+            ].copy()
+        stimulus_epochs["diff"] = stimulus_epochs["end"] - stimulus_epochs["start"]
+        stimulus_epochs = stimulus_epochs.sort_values(by="orientation")
+        x_range = stimulus_epochs["diff"].max()
+        y_range = stimulus_epochs["orientation"].value_counts().max() + 1
+
+        fig, axs = plt.subplots(1, 1, figsize=(10, 6))
+        for i, ori in enumerate(self.directions):
+            cell_spike_times = self.get_cell_stimulus_spikes_to_one_range(
+                cellIdx, stimulus_epochs[stimulus_epochs["orientation"] == ori]
+            )
+            for t, trial in enumerate(cell_spike_times):
+                axs.scatter(
+                    trial[:, 0],
+                    np.zeros_like(trial[:, 1]) + (i * y_range) + t + 0.5,
+                    c="k",
+                    s=2,
+                    marker="|",
+                )
+
+        # x-axis
+        axs.set_xlim(-0.01, 2.0)
+        axs.set_xlabel("Time [s]")
+
+        # y-axis
+        axs.set_ylim(0, len(self.directions) * y_range)
+        axs.set_yticks(np.arange(len(self.directions) * y_range, step=y_range))
+        axs.set_yticklabels(self.directions)
+        axs.set_ylabel("Direction [°]")
+        for tick_label in axs.get_yticklabels():
+            tick_label.set_transform(
+                tick_label.get_transform()
+                + transforms.ScaledTranslation(0, 0.3, fig.dpi_scale_trans)
+            )
+        freq_string = (
+            "Independent of Temporal Frequency"
+            if frequency == 0.0
+            else f"Temporal Frequency {frequency} Hz"
+        )
+        axs.set_title(
+            f"Spike Times of Cell {cellIdx} per Orientation and Trial - {freq_string}"
+        )
+        axs.grid(axis="y", alpha=0.5)
+        plt.show()
+
+    def update_spikes_per_frequency(self, cellIdx: int, sample_range: list[float, float]) -> None:
+        start = max(int(sample_range[0] * self.fs), 0)
+        end = min(int(sample_range[1] * self.fs), len(self.t) - 1)
+        y_step = len(self.frequencies) + 1
+        # create color array of y_step distinguishable colors
+        colors = plt.cm.tab10(np.arange(0, y_step))
+        fig, axs = plt.subplots(1, 1, figsize=(10, 6))
+        for i, ori in enumerate(orientations):
+            for j, freq in enumerate(self.frequencies):
+                cell_spike_times = self.get_spike_times_cell(
+                    cellIdx, ori, freq
+                )
+                cell_spike_times_in_range = cell_spike_times[
+                    (cell_spike_times[:, 0] >= start) & (cell_spike_times[:, 0] <= end)
+                ]
+                axs.scatter(
+                    self.t[cell_spike_times_in_range[:, 0].astype(int)],
+                    np.zeros_like(cell_spike_times_in_range[:, 1]) + (i * y_step) + j + 0.5,
+                    color=colors[j],
+                    s=2,
+                    marker="|",
+                    label=f"{freq} Hz" if i == 0 else "",
+                )
+
+        # x-axis
+        axs.set_xlim(self.t[start], self.t[end])
+        axs.set_xlabel("Time [s]")
+
+        # y-axis
+        axs.set_ylim(0, len(self.directions) * y_step)
+        axs.set_yticks(np.arange(len(self.directions) * y_step, step=y_step))
+        axs.set_yticklabels(self.directions)
+        axs.set_ylabel("Direction [°]")
+        for tick_label in axs.get_yticklabels():
+            tick_label.set_transform(
+                tick_label.get_transform()
+                + transforms.ScaledTranslation(0, 0.18, fig.dpi_scale_trans)
+            )
+
+        axs.set_title(f"Spike Times of Cell {cellIdx} for Different Orientations")
+        axs.grid(axis="y", alpha=0.5)
+        # place legend outside on the right of the plot
+        plt.legend(
+            title=f" Temporal\n Frequency",
+            title_fontsize="medium",
+            loc="center left",
+            bbox_to_anchor=(1, 0.5),
+        )
+        plt.show()
+
     ### static plot functions
     def color_roi(self, data: np.array, title: str, is_binary: bool = False) -> None:
         if is_binary:
@@ -334,6 +462,9 @@ class Visualization:
         plt.legend()
         plt.show()
 
+    def running_activity_correlation(self):
+        pass
+
     ### Helper functions
     def get_epochs_stimulus_shown(self, start: int, end: int) -> pd.DataFrame:
         if start < 0:
@@ -354,6 +485,108 @@ class Visualization:
         if grating_epochs.iloc[-1]["end"] > end:
             grating_epochs.iloc[-1]["end"] = end
         return grating_epochs
+
+    def get_cell_stimulus_spikes_to_one_range(
+        self, cellIdx: int, stimulus_epochs: pd.DataFrame
+    ) -> list[np.array]:
+        """
+        Get the spike times for a specific cell and stimulus mapped to a single range.
+
+        Parameters
+        ----------
+        cellIdx: int
+            The index of the cell.
+        stimulus_epochs: pd.DataFrame
+            Preprocessed stimulus epochs table. It assumes that the table is filtered in terms of orientation and frequency.
+
+        Returns
+        -------
+        spike_times: list[np.array]
+            List of spike times for each stimulus epoch (trial).
+            np.array, (n_spikes, 2)
+            spike_times[:, 0] contains the time of the spikes in seconds
+            spike_times[:, 1] contains the intensity of the spikes
+        """
+        if self.inferred_spikes is None:
+            raise ValueError("Inferred spikes are not set. Use set_inferred_spikes method.")
+        
+        # time frame the spikes are mapped to
+        time_range = max(stimulus_epochs["end"] - stimulus_epochs["start"])
+        time_frame = self.t[:time_range] - self.t[0]
+
+        # iterate over the epochs the stimulus is shown
+        spike_times = []
+        for trial, epoch in enumerate(stimulus_epochs.iterrows()):
+            start = int(epoch[1]["start"])
+            end = int(epoch[1]["end"])
+            cell_spikes = self.inferred_spikes["spikes"][cellIdx, start:end]
+            idx_cell_spikes = np.where(cell_spikes > 0)[0]
+            cell_spike_times = np.zeros((len(idx_cell_spikes), 2))
+            cell_spike_times[:, 0] = time_frame[idx_cell_spikes]
+            cell_spike_times[:, 1] = cell_spikes[idx_cell_spikes]
+            spike_times.append(cell_spike_times)
+        return spike_times
+
+    def get_spike_times_cell(
+        self,
+        cell: int,
+        orientation: float = 0.0,
+        frequency: float = 1.0,
+        blank_sweep=False
+    ) -> np.array:
+        """
+        Get the spike times for a given orientation and frequency for a specific cell.
+
+        Parameters
+        ----------
+        cell: int
+            The index of the cell.
+        stim_table: pd.DataFrame
+            The table containing the start and end time index of each stimulus epoch.
+        orientation: float
+            The orientation of the drifting grating stimulus in degrees.
+        frequency: float
+            The frequency of the drifting grating stimulus in Hz.
+        blank_sweep: bool
+            If True, return the spike times for the blank sweep periods.
+
+        Returns
+        -------
+        spike_times: np.array, (n_spikes, 2)
+            spike_times[:, 0] contains the time index of the spikes
+            spike_times[:, 1] contains the intensity of the spikes
+        """
+        # get epochs the stimulus is shown
+        if not blank_sweep:
+            stimulus_epochs = self.stim_table[
+                (self.stim_table["orientation"] == orientation)
+                & (self.stim_table["temporal_frequency"] == frequency)
+            ]
+        else:
+            stimulus_epochs = self.stim_table[self.stim_table["blank_sweep"] == 1.0]
+
+        # create binary mask for the entire experiment time with 1s for the stimulus epochs
+        epochs_mask = np.zeros(self.inferred_spikes["spikes"].shape[1], dtype=int)
+        for idx, epoch in stimulus_epochs.iterrows():
+            epochs_mask[int(epoch["start"]) : int(epoch["end"])] = 1
+
+        # match the epochs mask with the cells spike train by mutliplying them elementwise
+        cell_spikes = self.inferred_spikes["spikes"][cell] * epochs_mask
+
+        # store indices where cell_spikes is not zero using argwhere
+        spike_indices = np.argwhere(cell_spikes > 0).flatten().astype(int)
+
+        # remove zero entries from cell_spikes
+        cell_spikes = cell_spikes[cell_spikes > 0]
+
+        # check if cell_spikes has the same length as spike_indices
+        assert len(cell_spikes) == len(spike_indices)
+
+        # create the spike times array
+        spike_times = np.zeros((len(cell_spikes), 2))
+        spike_times[:, 0] = spike_indices
+        spike_times[:, 1] = cell_spikes
+        return spike_times
 
 
 # load data

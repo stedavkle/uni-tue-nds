@@ -455,7 +455,7 @@ def analyze_spike_running_correlation(spiketrains, running_period):
             # If there's no variation, set p-value to 1.0
             p_value = 1.0
         else:
-            # Use independent t-test or Mann-Whitney U test
+            # Use independent t-testa
             t_stat, p_value = ttest_ind(
                 spikes_running, spikes_non_running, equal_var=False
             )
@@ -530,7 +530,6 @@ def get_epochs_in_range(stim_epoch_table: pd.DataFrame, start: int = 0, end: int
     ]
 
     return other_stimuli_epochs
-
 
 ### ML Estimation of RF
 
