@@ -757,7 +757,7 @@ def getMaxOfTemporalTuningCurves(
         #     ]
         # )
         max_direction_idx2 = np.argmax(
-            tuning_curve_fit[neuron]["fitted_curves"][
+            fitted_curves[
                 max_curve_idx_for_all_directions[max_direction_idx]
             ]
         )
