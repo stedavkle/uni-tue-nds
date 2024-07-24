@@ -1015,3 +1015,141 @@ def bin_spike_counts(stim_table, spikes, neuron):
         spike_count[i] = np.sum(spikes["binspikes"][neuron, start:end])
 
     return spike_count
+
+def process_tuning_results(
+    testTuningFunctionResultsDir: dict,
+    stim_table: pd.DataFrame,
+    inferred_spikes: dict,
+    max_of_temporal_tuning_curve: dict,
+    keys: list,
+    p_thresh: float = 0.0001
+) -> pd.DataFrame:
+    """
+    Processes the results of temporal frequency tuning tests, creating a DataFrame
+    with relevant statistics for further analysis.
+
+    Args:
+        testTuningFunctionResultsDir: Dictionary containing test results per neuron.
+        p_thresh: Significance threshold for p-values.
+        keys: List of temporal frequencies used in the tests.
+
+    Returns:
+        DataFrame containing processed results.
+    """
+    spike_count = np.array(
+    [
+        bin_spike_counts(stim_table, inferred_spikes, neuron=neuron)
+        for neuron in range(inferred_spikes["binspikes"].shape[0])
+    ]
+    )
+    
+    rows = []
+
+    for neuron, temporal_resolutions in testTuningFunctionResultsDir.items():
+        # Create a row with the neuron index and its p-values
+        row = {"Neuron": neuron}
+        for resolution, values in temporal_resolutions.items():
+            if resolution == -1:
+                row["all freq."] = 1 if values["p"] <= p_thresh else 0
+            else:
+                row[resolution] = (
+                    1 if values["p"] <= p_thresh else 0
+                )  # Extract the p value
+            row[f"p_val_{resolution}"] = values["p"]
+            row[f"q_{resolution}"] = values["q"]  # Extract q value
+        rows.append(row)
+
+    # Create DataFrame from rows
+    df_dir = pd.DataFrame(rows)
+    df_dir.columns = df_dir.columns.astype(str)
+    df_dir.set_index("Neuron", inplace=True)
+    for freq in keys[0:-1]:
+        df_dir[f"LI_{freq}"] = df_dir[f"q_{freq}"] / np.mean(
+            spike_count[:, stim_table["temporal_frequency"] == freq], axis=1
+        )
+    # Calculate our linearity Index:
+    df_dir["LI_all"] = df_dir["q_-1"] / np.mean(spike_count, axis=1)
+
+    filtered_columns = [col for col in df_dir.columns if col.startswith("LI")]
+    df_dir["complex"] = df_dir[filtered_columns].lt(1).all(axis=1)
+    df_dir["complex_flag"] = df_dir["complex"].apply(lambda x: 1 if x else 0)
+    cols_to_remove = [col for col in df_dir.columns if col.startswith(("LI", "q"))]
+    df_dir = df_dir.drop(columns=cols_to_remove)
+    # Convert the dictionary to a DataFrame
+    max_df = pd.DataFrame.from_dict(max_of_temporal_tuning_curve, orient="index")
+
+    # Concatenate the new DataFrame with the existing one
+    df_dir = pd.concat([df_dir, max_df], axis=1)
+
+    return df_dir
+
+def process_tuning_data(
+    testTuningFunctionResultsOr: dict,
+    max_of_temporal_tuning_curve: dict,
+    df_dir: pd.DataFrame,
+    keys_str: list,
+    p_thresh: float = 0.0001,  # Added default p-value threshold
+):
+    """
+    Processes temporal frequency tuning data, constructs DataFrames,
+    and calculates summary statistics for complex and non-complex neurons.
+
+    Args:
+        testTuningFunctionResultsOr: Dictionary containing test results per neuron.
+        max_of_temporal_tuning_curve: Dictionary with maximum values for the tuning curve.
+        keys_str: List of string keys representing temporal frequencies.
+        p_thresh: (Optional) P-value threshold for determining significance (default: 0.0001).
+
+    Returns:
+        df_or: DataFrame with processed results.
+        df_complex: DataFrame for complex neurons (excluding 'complex' column).
+        df_non_complex: DataFrame for non-complex neurons (excluding 'complex' column).
+        comp_or: Sum of values across `keys_str` columns for complex neurons in `df_or`.
+        noncomp_or: Sum of values across `keys_str` columns for non-complex neurons in `df_or`.
+        comp_dir: Sum of values across `keys_str` columns for complex neurons in `df_dir`.
+        noncomp_dir: Sum of values across `keys_str` columns for non-complex neurons in `df_dir`.
+    """
+
+    # Create rows for DataFrame (with dictionary comprehension)
+    rows = [
+        {
+            "Neuron": neuron,
+            **{
+                resolution: 1 if values["p"] <= p_thresh else 0
+                for resolution, values in temporal_resolutions.items()
+                if resolution != -1
+            },
+            "all freq.": (
+                1 if temporal_resolutions[-1]["p"] <= p_thresh else 0
+            ),  # Calculate "all freq." value
+            **{
+                f"p_val_{resolution}": values["p"]
+                for resolution, values in temporal_resolutions.items()
+            },
+        }
+        for neuron, temporal_resolutions in testTuningFunctionResultsOr.items()
+    ]
+
+    # Create DataFrame from rows and set 'Neuron' as index
+    df_or = pd.DataFrame(rows)
+    df_or.columns = df_or.columns.astype(str)
+    # Set the Neuron column as the index
+    df_or.set_index("Neuron", inplace=True)
+    df_or["complex"] = df_dir["complex"]
+    max_df = pd.DataFrame.from_dict(max_of_temporal_tuning_curve, orient="index")
+
+    # Concatenate the new DataFrame with the existing one
+    df_or = pd.concat([df_or, max_df], axis=1)
+
+    ## Save some data for the plots below:
+    df_complex = df_or[df_or["complex"]].drop("complex", axis=1)
+    df_non_complex = df_or[~df_or["complex"]].drop("complex", axis=1)
+    comp_or = df_complex[keys_str].sum()
+    noncomp_or = df_non_complex[keys_str].sum()
+
+    df_complex = df_dir[df_dir["complex"]].drop("complex", axis=1)
+    df_non_complex = df_dir[~df_dir["complex"]].drop("complex", axis=1)
+    comp_dir = df_complex[keys_str].sum()
+    noncomp_dir = df_non_complex[keys_str].sum()
+
+    return df_or, df_complex, df_non_complex, comp_or, noncomp_or, comp_dir, noncomp_dir
