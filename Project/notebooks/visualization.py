@@ -27,7 +27,7 @@ class Visualization:
         self.frequencies = self.stim_table["temporal_frequency"].dropna().unique().tolist()
         self.frequencies.sort()
         self.inferred_spikes = None
-        self.keys_str = ["1", "2", "4", "8", "15", "all freq."] # access keys for dataframe columns
+        self.keys_str = ["1", "2", "4", "8", "15", "-1"] # access keys for dataframe columns
 
     def set_inferred_spikes(self, inferred_spikes: dict) -> None:
         """ 

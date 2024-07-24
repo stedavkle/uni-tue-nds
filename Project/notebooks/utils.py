@@ -1,7 +1,7 @@
 import oopsi
 import pandas as pd
 import numpy as np
-from scipy.stats import ttest_ind, mannwhitneyu, pearsonr, stats
+from scipy.stats import ttest_ind, mannwhitneyu, pearsonr, stats, f_oneway
 from scipy.optimize import curve_fit
 import statsmodels.stats.multitest as smm
 from scipy import signal, ndimage
@@ -10,6 +10,7 @@ from tqdm import tqdm
 import pickle
 from oasis.functions import deconvolve
 from oasis.oasis_methods import oasisAR1, oasisAR2
+from joblib import Parallel, delayed
 
 ### helper functions for accessing data
 
@@ -876,14 +877,18 @@ def testTuningFunction_opt(
             q = np.abs(np.dot(m_k, v_k))
 
             rng = np.random.default_rng(random_seed)
-
-            for i in range(niters):
+            # Parallelize the inner loop
+            def process_iteration(i):
                 shuffled_counts = rng.permutation(spike_counts)
                 shuffled_m_k = np.array(
                     [np.mean(shuffled_counts[dirs == d]) for d in unique_directions]
                 )
-                qdistr[neuron, tf, i] = np.abs(np.dot(shuffled_m_k, v_k))
+                return np.abs(np.dot(shuffled_m_k, v_k))
 
+            qdistr_values = Parallel(n_jobs=-1)(
+                delayed(process_iteration)(i) for i in range(niters)
+            )
+            qdistr[neuron, tf, :] = np.array(qdistr_values)
             p = np.sum(qdistr[neuron, tf, :] >= q) / niters
             result[neuron][temporal_frequency] = {
                 "p": p,
@@ -985,7 +990,7 @@ def process_tuning_results(
         row = {"Neuron": neuron}
         for resolution, values in temporal_resolutions.items():
             if resolution == -1:
-                row["all freq."] = 1 if values["p"] <= p_thresh else 0
+                row["-1"] = 1 if values["p"] <= p_thresh else 0
             else:
                 row[resolution] = (
                     1 if values["p"] <= p_thresh else 0
@@ -1054,7 +1059,7 @@ def process_tuning_data(
                 for resolution, values in temporal_resolutions.items()
                 if resolution != -1
             },
-            "all freq.": (
+            "-1": (
                 1 if temporal_resolutions[-1]["p"] <= p_thresh else 0
             ),  # Calculate "all freq." value
             **{
@@ -1121,3 +1126,65 @@ def kolomogrovTest(df:pd.DataFrame(),
     print("----------------------------------------------------")
 
     return results_df
+    
+def process_permutation(i, stim_table, inferred_spikes, neuron):
+    permuted_frequencies = np.random.permutation(
+        stim_table["temporal_frequency"].dropna()
+    )
+    spike_count_by_freq = get_spike_count_by_freq(
+        stim_table, permuted_frequencies, inferred_spikes, neuron
+    )
+    return get_test(spike_count_by_freq)
+
+
+def get_p_values_permutation_test_helper(inferred_spikes, stim_table, n_permutations, n_jobs=-1):
+    neuron_stats = {}
+    permuted_stats = {}
+
+    for neuron in range(inferred_spikes["binspikes"].shape[0]):
+        spike_count_by_freq = get_spike_count_by_freq(
+            stim_table,
+            stim_table["temporal_frequency"].dropna().values,
+            inferred_spikes,
+            neuron,
+        )
+        neuron_stats[neuron] = get_test(spike_count_by_freq)
+
+        results = Parallel(n_jobs=n_jobs)(
+            delayed(process_permutation)(i, stim_table, inferred_spikes, neuron)
+            for i in range(n_permutations)
+        )
+        permuted_stats[neuron] = np.array(results)  # Store as numpy array
+
+    return neuron_stats, permuted_stats
+
+def get_spike_count_by_freq(stim_table, frequencies, inferred_spikes, neuron=0):
+    """
+    this needs a comment
+    """
+    spike_count = bin_spike_counts(stim_table, inferred_spikes, neuron=neuron)
+    spike_count = spike_count[
+        stim_table["temporal_frequency"].dropna().index
+    ]  # shorten spike count
+    unique_frequencies = np.unique(frequencies)
+    spike_count_by_freq = np.zeros((len(unique_frequencies), 120))
+
+    for freq in unique_frequencies:
+        if len(spike_count[np.where(frequencies == freq)]) == 120:
+            spike_count_by_freq[np.where(unique_frequencies == freq)] = spike_count[
+                np.where(frequencies == freq)
+            ]
+        else:
+            spike_count_by_freq[np.where(unique_frequencies == freq)] = np.append(
+                spike_count[np.where(frequencies == freq)],
+                0,  # just add a zero when we are missing a condition...
+            )
+    return spike_count_by_freq
+
+
+def get_test(spike_count_by_freq):
+    # test statistic for our permutation test is a one way anove (variation explained by temporal frequency)
+    # variance explained by frequency (test the frequency distributions of each neuron against eachother)
+    return f_oneway(
+        *[spike_count_by_freq[i, :] for i in range(spike_count_by_freq.shape[0])]
+    ).statistic
