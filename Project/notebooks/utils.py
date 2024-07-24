@@ -1,7 +1,7 @@
 import oopsi
 import pandas as pd
 import numpy as np
-from scipy.stats import ttest_ind, mannwhitneyu, pearsonr
+from scipy.stats import ttest_ind, mannwhitneyu, pearsonr, stats
 from scipy.optimize import curve_fit
 import statsmodels.stats.multitest as smm
 from scipy import signal, ndimage
@@ -1153,3 +1153,36 @@ def process_tuning_data(
     noncomp_dir = df_non_complex[keys_str].sum()
 
     return df_or, df_complex, df_non_complex, comp_or, noncomp_or, comp_dir, noncomp_dir
+
+def kolomogrovTest(df:pd.DataFrame(),
+                   df2:pd.DataFrame() = None,
+                   columns: list = ["p_val_1", "p_val_2", "p_val_4", "p_val_8", "p_val_15", "p_val_-1"],
+                   base_column: str = "p_val_-1") -> pd.DataFrame():
+    # Perform the Kolmogorov-Smirnov test for each pair of distributions
+    if df2 is not None:
+        ks_statistic, p_value = stats.ks_2samp(df[base_column], df2[base_column])
+        print(f"KS Statistic: {ks_statistic}")
+        print(f"P-value: {p_value}")
+        return
+    
+    results = []
+    for col in df[columns].columns:
+        if col != base_column:
+            ks_statistic, p_value = stats.ks_2samp(df[base_column], df[col])
+            freq = col.split("_")[-1] + "_hz"
+            results.append(
+                {
+                    "Base Distribution": "all_freq",
+                    "Compared Distribution": freq,
+                    "KS Statistic": ks_statistic,
+                    "P-value": p_value,
+                }
+            )
+    results_df = pd.DataFrame(results)
+    print("----------------------------------------------------")
+    print("Significance Testing for Orientational Tuned Neurons")
+    print("----------------------------------------------------")
+    print(results_df)
+    print("----------------------------------------------------")
+
+    return results_df
