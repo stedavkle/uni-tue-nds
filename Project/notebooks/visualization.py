@@ -529,8 +529,8 @@ class Visualization:
             bounds = [-2.5, -1.5, -0.5, 0.5, 1.5, 2.5]
             legend_patches = [
                 mpatches.Patch(color=colors[0], label="Not Significant - Complex Cell"),
-                mpatches.Patch(color=colors[1], label="Not Significant - Single Cell"),
-                mpatches.Patch(color=colors[3], label="Significant - Single Cell"),
+                mpatches.Patch(color=colors[1], label="Not Significant - Simple Cell"),
+                mpatches.Patch(color=colors[3], label="Significant - Simple Cell"),
                 mpatches.Patch(color=colors[4], label="Significant - Complex Cell"),
             ]
         else:
