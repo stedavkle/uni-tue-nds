@@ -917,6 +917,42 @@ def testTuningFunction_opt(
             pickle.dump(qdistr, f)
     return result, qdistr
 
+def getTemporalTunings(
+    inferred_spikes: np.ndarray,
+    stim_table=pd.DataFrame(),):
+    """
+    Calculates mean and standard deviation of spike counts for each neuron and temporal frequency.
+
+    Args:
+        stim_table (DataFrame): Table containing stimulus information, including 'temporal_frequency'.
+        inferred_spikes (DataFrame): Spike data with a 'binspikes' column for each neuron.
+
+    Returns:
+        np.ndarray: Array with shape (2, neurons, unique_temporal_frequencies),
+                    where the first dimension represents mean (0) and std dev (1).
+    """
+    unique_dirs = np.unique(stim_table["temporal_frequency"].dropna())
+    neurons = inferred_spikes["binspikes"].shape[0]
+    temporal_tunings = np.zeros((2, neurons, len(unique_dirs)))
+    stim_table_tf_nona = stim_table["temporal_frequency"].dropna()
+
+    for neuron in range(neurons):
+        spike_count = bin_spike_counts(
+            stim_table, inferred_spikes, neuron=neuron
+        )[stim_table["temporal_frequency"].notna()]
+
+        temporal_tunings[:, neuron, :] = np.array(
+            [
+                (
+                    np.mean(spike_count[stim_table_tf_nona == d]),
+                    np.std(spike_count[stim_table_tf_nona == d]),
+                )
+                for d in unique_dirs
+            ]
+        ).T  # Transpose to match desired shape
+
+    return temporal_tunings
+
 def load_tuning_test_results(orientation: bool = True):
     file_string = "or" if orientation else "dir"
     with open(f"../data/qp_tuning_test_{file_string}.pkl", "rb") as f:
