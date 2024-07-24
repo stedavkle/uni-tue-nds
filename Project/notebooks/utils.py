@@ -432,44 +432,89 @@ def get_running_periods_table(running_periods: np.array) -> pd.DataFrame:
     running_periods_table = pd.DataFrame({"stimulus": ["running"] * len(start_indices), "start": start_indices, "end": stop_indices})
     return running_periods_table
 
-def analyze_spike_running_correlation(spiketrains, running_period):
-    n_cells, n_measurements = spiketrains.shape
+# TODO die funktion ist glaub überflüssig
+# def analyze_spike_running_correlation(spiketrains, running_period):
+#     n_cells, n_measurements = spiketrains.shape
 
-    # Ensure running_period is boolean
-    running_period = running_period.astype(bool)
+#     # Ensure running_period is boolean
+#     running_period = running_period.astype(bool)
 
-    # Initialize lists to store results
-    p_values = []
+#     # Initialize lists to store results
+#     p_values = []
 
-    # Iterate over each cell to perform the statistical test
-    for cell in range(n_cells):
-        # Get spikes for running and non-running periods
-        spikes_running = spiketrains[cell, running_period]
-        spikes_non_running = spiketrains[cell, ~running_period]
+#     # Iterate over each cell to perform the statistical test
+#     for cell in range(n_cells):
+#         # Get spikes for running and non-running periods
+#         spikes_running = spiketrains[cell, running_period]
+#         spikes_non_running = spiketrains[cell, ~running_period]
 
-        # Calculate the average spike rate during running and non-running periods
-        rate_running = np.mean(spikes_running)
-        rate_non_running = np.mean(spikes_non_running)
+#         # Calculate the average spike rate during running and non-running periods
+#         rate_running = np.mean(spikes_running)
+#         rate_non_running = np.mean(spikes_non_running)
 
-        # Perform unpaired statistical test
-        if np.var(spikes_running) == 0 or np.var(spikes_non_running) == 0:
-            # If there's no variation, set p-value to 1.0
-            p_value = 1.0
-        else:
-            # Use independent t-testa
-            t_stat, p_value = ttest_ind(
-                spikes_running, spikes_non_running, equal_var=False
-            )
+#         # Perform unpaired statistical test
+#         if np.var(spikes_running) == 0 or np.var(spikes_non_running) == 0:
+#             # If there's no variation, set p-value to 1.0
+#             p_value = 1.0
+#         else:
+#             # Use independent t-testa
+#             t_stat, p_value = ttest_ind(
+#                 spikes_running, spikes_non_running, equal_var=False
+#             )
 
-        p_values.append(p_value)
+#         p_values.append(p_value)
 
-    # Apply multiple comparisons correction (Bonferroni)
-    corrected_p_values = smm.multipletests(p_values, method="bonferroni")[1]
+#     # Apply multiple comparisons correction (Bonferroni)
+#     corrected_p_values = smm.multipletests(p_values, method="bonferroni")[1]
 
-    # Identify significant cells
-    significant_cells = np.where(corrected_p_values < 0.05)[0]
+#     # Identify significant cells
+#     significant_cells = np.where(corrected_p_values < 0.05)[0]
 
-    return significant_cells, corrected_p_values
+#     return significant_cells, corrected_p_values
+
+def get_running_correlation_max(roi_masks, inferred_spikes, running_speed):
+    """
+    Calculate the correlation between the running speed and the activity of each cell.
+    The correlation is then applied to the roi masks of the cells.
+    The top 10 absolute correlation values are returned.
+
+    Parameters
+    ----------
+    roi_masks: np.array
+        The roi masks of the cells.
+    inferred_spikes: dict
+        The inferred spikes of the cells.
+    running_speed: np.array
+        The running speed of the mouse.
+
+    Returns
+    -------
+    roi_masks_corr_sum: np.array
+        The sum of the roi masks with the correlation values applied.
+    top_10: np.array
+        The top 10 absolute correlation values.
+    """
+    roi_masks_copy = roi_masks.copy()
+    roi_masks_corr = np.zeros_like(roi_masks_copy, dtype=np.float64)
+    cell_cor = np.zeros(roi_masks_copy.shape[0])
+    for cell in range(roi_masks_copy.shape[0]):
+        corr, p = pearsonr(inferred_spikes["binspikes"][cell], running_speed)
+        roi_masks_corr[cell, :, :] = np.where(
+            roi_masks_copy[cell, :, :].astype(np.float64) < 1,
+            roi_masks_copy[cell, :, :],
+            corr,
+        )
+        cell_cor[cell] = corr
+
+    roi_masks_sum = np.sum(roi_masks_copy, axis=0)
+    roi_masks_sum = roi_masks_sum / np.max(roi_masks_sum)
+
+    roi_masks_corr_sum = np.sum(roi_masks_corr, axis=0)
+    roi_masks_corr_sum = roi_masks_corr_sum / np.max(roi_masks_corr_sum)
+
+    # get the top 10 correlation values
+    top_10 = np.argsort(np.abs(cell_cor))[-10:]
+    return roi_masks_corr_sum, top_10
 
 ### Visualization Helper
 def get_epochs_in_range(stim_epoch_table: pd.DataFrame, start: int = 0, end: int = 105967) -> pd.DataFrame:
@@ -757,7 +802,7 @@ def getMaxOfTemporalTuningCurves(
         #     ]
         # )
         max_direction_idx2 = np.argmax(
-            tuning_curve_fit[neuron]["fitted_curves"][
+            fitted_curves[
                 max_curve_idx_for_all_directions[max_direction_idx]
             ]
         )
@@ -970,3 +1015,141 @@ def bin_spike_counts(stim_table, spikes, neuron):
         spike_count[i] = np.sum(spikes["binspikes"][neuron, start:end])
 
     return spike_count
+
+def process_tuning_results(
+    testTuningFunctionResultsDir: dict,
+    stim_table: pd.DataFrame,
+    inferred_spikes: dict,
+    max_of_temporal_tuning_curve: dict,
+    keys: list,
+    p_thresh: float = 0.0001
+) -> pd.DataFrame:
+    """
+    Processes the results of temporal frequency tuning tests, creating a DataFrame
+    with relevant statistics for further analysis.
+
+    Args:
+        testTuningFunctionResultsDir: Dictionary containing test results per neuron.
+        p_thresh: Significance threshold for p-values.
+        keys: List of temporal frequencies used in the tests.
+
+    Returns:
+        DataFrame containing processed results.
+    """
+    spike_count = np.array(
+    [
+        bin_spike_counts(stim_table, inferred_spikes, neuron=neuron)
+        for neuron in range(inferred_spikes["binspikes"].shape[0])
+    ]
+    )
+    
+    rows = []
+
+    for neuron, temporal_resolutions in testTuningFunctionResultsDir.items():
+        # Create a row with the neuron index and its p-values
+        row = {"Neuron": neuron}
+        for resolution, values in temporal_resolutions.items():
+            if resolution == -1:
+                row["all freq."] = 1 if values["p"] <= p_thresh else 0
+            else:
+                row[resolution] = (
+                    1 if values["p"] <= p_thresh else 0
+                )  # Extract the p value
+            row[f"p_val_{resolution}"] = values["p"]
+            row[f"q_{resolution}"] = values["q"]  # Extract q value
+        rows.append(row)
+
+    # Create DataFrame from rows
+    df_dir = pd.DataFrame(rows)
+    df_dir.columns = df_dir.columns.astype(str)
+    df_dir.set_index("Neuron", inplace=True)
+    for freq in keys[0:-1]:
+        df_dir[f"LI_{freq}"] = df_dir[f"q_{freq}"] / np.mean(
+            spike_count[:, stim_table["temporal_frequency"] == freq], axis=1
+        )
+    # Calculate our linearity Index:
+    df_dir["LI_all"] = df_dir["q_-1"] / np.mean(spike_count, axis=1)
+
+    filtered_columns = [col for col in df_dir.columns if col.startswith("LI")]
+    df_dir["complex"] = df_dir[filtered_columns].lt(1).all(axis=1)
+    df_dir["complex_flag"] = df_dir["complex"].apply(lambda x: 1 if x else 0)
+    cols_to_remove = [col for col in df_dir.columns if col.startswith(("LI", "q"))]
+    df_dir = df_dir.drop(columns=cols_to_remove)
+    # Convert the dictionary to a DataFrame
+    max_df = pd.DataFrame.from_dict(max_of_temporal_tuning_curve, orient="index")
+
+    # Concatenate the new DataFrame with the existing one
+    df_dir = pd.concat([df_dir, max_df], axis=1)
+
+    return df_dir
+
+def process_tuning_data(
+    testTuningFunctionResultsOr: dict,
+    max_of_temporal_tuning_curve: dict,
+    df_dir: pd.DataFrame,
+    keys_str: list,
+    p_thresh: float = 0.0001,  # Added default p-value threshold
+):
+    """
+    Processes temporal frequency tuning data, constructs DataFrames,
+    and calculates summary statistics for complex and non-complex neurons.
+
+    Args:
+        testTuningFunctionResultsOr: Dictionary containing test results per neuron.
+        max_of_temporal_tuning_curve: Dictionary with maximum values for the tuning curve.
+        keys_str: List of string keys representing temporal frequencies.
+        p_thresh: (Optional) P-value threshold for determining significance (default: 0.0001).
+
+    Returns:
+        df_or: DataFrame with processed results.
+        df_complex: DataFrame for complex neurons (excluding 'complex' column).
+        df_non_complex: DataFrame for non-complex neurons (excluding 'complex' column).
+        comp_or: Sum of values across `keys_str` columns for complex neurons in `df_or`.
+        noncomp_or: Sum of values across `keys_str` columns for non-complex neurons in `df_or`.
+        comp_dir: Sum of values across `keys_str` columns for complex neurons in `df_dir`.
+        noncomp_dir: Sum of values across `keys_str` columns for non-complex neurons in `df_dir`.
+    """
+
+    # Create rows for DataFrame (with dictionary comprehension)
+    rows = [
+        {
+            "Neuron": neuron,
+            **{
+                resolution: 1 if values["p"] <= p_thresh else 0
+                for resolution, values in temporal_resolutions.items()
+                if resolution != -1
+            },
+            "all freq.": (
+                1 if temporal_resolutions[-1]["p"] <= p_thresh else 0
+            ),  # Calculate "all freq." value
+            **{
+                f"p_val_{resolution}": values["p"]
+                for resolution, values in temporal_resolutions.items()
+            },
+        }
+        for neuron, temporal_resolutions in testTuningFunctionResultsOr.items()
+    ]
+
+    # Create DataFrame from rows and set 'Neuron' as index
+    df_or = pd.DataFrame(rows)
+    df_or.columns = df_or.columns.astype(str)
+    # Set the Neuron column as the index
+    df_or.set_index("Neuron", inplace=True)
+    df_or["complex"] = df_dir["complex"]
+    max_df = pd.DataFrame.from_dict(max_of_temporal_tuning_curve, orient="index")
+
+    # Concatenate the new DataFrame with the existing one
+    df_or = pd.concat([df_or, max_df], axis=1)
+
+    ## Save some data for the plots below:
+    df_complex = df_or[df_or["complex"]].drop("complex", axis=1)
+    df_non_complex = df_or[~df_or["complex"]].drop("complex", axis=1)
+    comp_or = df_complex[keys_str].sum()
+    noncomp_or = df_non_complex[keys_str].sum()
+
+    df_complex = df_dir[df_dir["complex"]].drop("complex", axis=1)
+    df_non_complex = df_dir[~df_dir["complex"]].drop("complex", axis=1)
+    comp_dir = df_complex[keys_str].sum()
+    noncomp_dir = df_non_complex[keys_str].sum()
+
+    return df_or, df_complex, df_non_complex, comp_or, noncomp_or, comp_dir, noncomp_dir
