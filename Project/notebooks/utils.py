@@ -491,12 +491,14 @@ def get_running_correlation_max(roi_masks, inferred_spikes, running_speed):
     -------
     roi_masks_corr_sum: np.array
         The sum of the roi masks with the correlation values applied.
+    cell_corr: np.array
+        The correlation values for each cell.
     top_10: np.array
         The top 10 absolute correlation values.
     """
     roi_masks_copy = roi_masks.copy()
     roi_masks_corr = np.zeros_like(roi_masks_copy, dtype=np.float64)
-    cell_cor = np.zeros(roi_masks_copy.shape[0])
+    cell_corr = np.zeros(roi_masks_copy.shape[0])
     for cell in range(roi_masks_copy.shape[0]):
         corr, p = pearsonr(inferred_spikes["binspikes"][cell], running_speed)
         roi_masks_corr[cell, :, :] = np.where(
@@ -504,7 +506,7 @@ def get_running_correlation_max(roi_masks, inferred_spikes, running_speed):
             roi_masks_copy[cell, :, :],
             corr,
         )
-        cell_cor[cell] = corr
+        cell_corr[cell] = corr
 
     roi_masks_sum = np.sum(roi_masks_copy, axis=0)
     roi_masks_sum = roi_masks_sum / np.max(roi_masks_sum)
@@ -513,8 +515,8 @@ def get_running_correlation_max(roi_masks, inferred_spikes, running_speed):
     roi_masks_corr_sum = roi_masks_corr_sum / np.max(roi_masks_corr_sum)
 
     # get the top 10 correlation values
-    top_10 = np.argsort(np.abs(cell_cor))[-10:]
-    return roi_masks_corr_sum, top_10
+    top_10 = np.argsort(np.abs(cell_corr))[-10:]
+    return roi_masks_corr_sum, cell_corr, top_10
 
 ### Visualization Helper
 def get_epochs_in_range(stim_epoch_table: pd.DataFrame, start: int = 0, end: int = 105967) -> pd.DataFrame:

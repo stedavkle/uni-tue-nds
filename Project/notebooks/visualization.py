@@ -4,8 +4,9 @@ import pandas as pd
 import matplotlib.pyplot as plt
 import matplotlib.transforms as transforms
 import matplotlib.patches as mpatches
-from matplotlib.colors import ListedColormap
+from matplotlib.colors import ListedColormap, BoundaryNorm
 from IPython.display import display, Image, clear_output
+import seaborn as sns
 
 class Visualization:
     def __init__(self, data: dict):
@@ -25,6 +26,7 @@ class Visualization:
         self.frequencies = self.stim_table["temporal_frequency"].dropna().unique().tolist()
         self.frequencies.sort()
         self.inferred_spikes = None
+        self.keys_str = ["1", "2", "4", "8", "15", "all freq."] # access keys for dataframe columns
 
     def set_inferred_spikes(self, inferred_spikes: dict) -> None:
         """ 
@@ -704,6 +706,108 @@ class Visualization:
                         ax.set_ylabel("p-value")
                 ax.set_title(f"{freqs[col]}")
         plt.suptitle("Distribution of p-values", fontsize=16)
+        plt.show()
+
+    def plot_num_significant_cells(self, comp_or: np.array, noncomp_or: np.array, comp_dir: np.array, noncomp_dir: np.array) -> None:
+        """
+        Plot the number of significant neurons for orientation and direction tuning per temporal frequency.
+
+        Parameters
+        ----------
+        comp_or: np.array
+            Number of complex neurons for orientation tuning.
+        noncomp_or: np.array
+            Number of simple neurons for orientation tuning.
+        comp_dir: np.array
+            Number of complex neurons for direction tuning.
+        noncomp_dir: np.array
+            Number of simple neurons for direction tuning.
+        """
+        keys_str = ["1", "2", "4", "8", "15", "All"]
+        x_axis = np.arange(len(keys_str))
+        data = [comp_or, comp_dir, noncomp_or, noncomp_dir]
+        fig, axs = plt.subplots(1, 2, figsize=(10, 4), constrained_layout=True)
+        for i, ax in enumerate(axs):
+            ax.scatter(
+                x_axis - 0.05,
+                data[i].values,
+                color="blue",
+                label="Complex Neurons",
+            )
+            ax.scatter(
+                x_axis + 0.05,
+                data[i + 2].values,
+                color="lightblue",
+                label="Simple Neurons",
+            )
+            ax.set_xticks(x_axis)
+            ax.set_xticklabels(keys_str)
+            ax.set_xlim(-0.3, len(keys_str) - 0.7)
+            ax.set_ylim(0, 40)
+            ax.set_xlabel("Temporal Frequency [Hz]")
+            ax.set_ylabel("Sum of Significant Neurons")
+            ax.set_title("Orientation Tuned" if i == 0 else "Direction Tuned")
+            ax.legend(loc="lower left")
+
+        plt.suptitle("Number of Significant Neurons for Orientation and Direction Tuning")
+        plt.show()
+
+    def plot_significance_heatmap(self, data: pd.DataFrame, p_thresh: float, direction=True):
+        """ 
+        Plot a heatmap of the significance of the tuned neurons.
+        The heatmap shows the significance of the tuned neurons for each temporal frequency.
+
+        Parameters
+        ----------
+        data : pd.DataFrame
+            The DataFrame containing the significance values of the tuned neurons.
+        p_thresh : float
+            The significance threshold.
+        direction : bool, optional
+            If True, the heatmap is for direction tuned neurons, else for orientation tuned neurons, by default True.
+        """
+        colors = ["white", "black"]
+        cmap = ListedColormap(colors)
+        bounds = [-0.5, 0.5, 1.5]
+        norm = BoundaryNorm(bounds, cmap.N)
+
+        plt.figure(figsize=(15, 2))
+        ax = sns.heatmap(
+            data[self.keys_str].T,
+            cmap=cmap,
+            norm=norm,
+            cbar=False,
+            xticklabels=True,
+            yticklabels=True,
+            linewidths=0.1,
+            linecolor="gray",
+            square=False,
+        )
+
+        xticks = ax.get_xticks()
+        ax.set_xticks(xticks[::5])
+        ax.set_xticklabels([f"{int(tick)}" for tick in xticks[::5]], rotation=0)
+        ax.set_yticklabels(["1", "2", "4", "8", "15", "All"], rotation=0)
+
+        legend_elements = [
+            mpatches.Patch(facecolor="white", edgecolor="gray", label="0"),
+            mpatches.Patch(facecolor="black", edgecolor="gray", label="1"),
+        ]
+        plt.legend(
+            handles=legend_elements,
+            title="Significance",
+            bbox_to_anchor=(1.01, 0.5),
+            loc="center left",
+            borderaxespad=0.0,
+            frameon=False,
+        )
+
+        plt.ylabel("Temporal Frequency [Hz]")
+        plt.xlabel("Neurons")
+        ordir_string = "Direction" if direction else "Orientation"
+        plt.title(
+            f"Significant {ordir_string} Tuned Neurons (at Significance Level {p_thresh})"
+        )
         plt.show()
 
     ################################################################################################
