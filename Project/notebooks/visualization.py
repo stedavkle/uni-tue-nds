@@ -7,6 +7,7 @@ import matplotlib.patches as mpatches
 from matplotlib.colors import ListedColormap, BoundaryNorm
 from IPython.display import display, Image, clear_output
 import seaborn as sns
+import warnings
 
 class Visualization:
     def __init__(self, data: dict):
@@ -139,14 +140,14 @@ class Visualization:
         axs[0].set_title(f"Raw Activity Trace of Cell {cellIdx}")
         axs[0].set_ylabel("Activity")
         axs[0].set_ylim([np.min(self.dff[cellIdx, :] - 0.2), np.max(self.dff[cellIdx, :]) + 0.2])
-        axs[0].set_xlim([self.t[start] - 10, self.t[end] + 10])
+        axs[0].set_xlim([self.t[start], self.t[end]])
 
         axs[1].plot(self.t[start:end], self.running_speed[start:end], color="orange")
         axs[1].set_title("Running Speed")
         axs[1].set_xlabel("Time [s]")
         axs[1].set_ylabel("Speed [cm/s]")
         axs[1].set_ylim([-15, np.max(self.running_speed) + 5])
-        axs[1].set_xlim([self.t[start] - 10, self.t[end] + 10])
+        axs[1].set_xlim([self.t[start], self.t[end]])
 
         if show_epochs:
             epochs = self.get_epochs_stimulus_shown(start, end)
@@ -819,20 +820,22 @@ class Visualization:
             start = 0
         if end > len(self.t)-1:
             end = len(self.t)-1
-        grating_epochs = self.stim_epoch_table[self.stim_epoch_table["stimulus"] == "drifting_gratings"]
-        # pop out all rows where either start and end are outside the interval, 
-        # start is inside the interval or end is inside the interval
-        grating_epochs = grating_epochs[~((grating_epochs["start"] > end) | (grating_epochs["end"] < start))]
-        # check if it is empty and return
-        if grating_epochs.empty:
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore")
+            grating_epochs = self.stim_epoch_table[self.stim_epoch_table["stimulus"] == "drifting_gratings"]
+            # pop out all rows where either start and end are outside the interval, 
+            # start is inside the interval or end is inside the interval
+            grating_epochs = grating_epochs[~((grating_epochs["start"] > end) | (grating_epochs["end"] < start))]
+            # check if it is empty and return
+            if grating_epochs.empty:
+                return grating_epochs
+            # check if start is outside the first epoch interval
+            if grating_epochs.iloc[0]["start"] < start:
+                grating_epochs.iloc[0]["start"] = start
+            # check if end is outside the last epoch interval
+            if grating_epochs.iloc[-1]["end"] > end:
+                grating_epochs.iloc[-1]["end"] = end
             return grating_epochs
-        # check if start is outside the first epoch interval
-        if grating_epochs.iloc[0]["start"] < start:
-            grating_epochs.iloc[0]["start"] = start
-        # check if end is outside the last epoch interval
-        if grating_epochs.iloc[-1]["end"] > end:
-            grating_epochs.iloc[-1]["end"] = end
-        return grating_epochs
 
     def get_cell_stimulus_spikes_to_one_range(
         self, cellIdx: int, stimulus_epochs: pd.DataFrame
