@@ -500,7 +500,7 @@ class Visualization:
 
         Parameters
         ----------
-        data: np.array -> (2, n_cells) if is_binary else (n_cells,)
+        data: np.array -> (n_cells,) or (2, n_cells) if is_binary else (n_cells,)
             The data to color the ROI masks.
             If is_binary is True, the data should be binary values (0 or 1) for each cell.
                 data[0, :] significant cells (0: not significant, 1: significant)
@@ -511,38 +511,61 @@ class Visualization:
         is_binary: bool, optional
             If True, the data is binary values (0 or 1) for each cell, by default False.
         """
-
         tab_cmap = plt.get_cmap("tab20")
+        def get_color(i):
+            if i == 15:
+                return "white"
+            return tab_cmap(i)
+
         if is_binary:
-            tab_idx = [0, 1, 15, 7, 6]
-            colors = [tab_cmap(i) for i in tab_idx]
             mask = np.zeros(self.roi_masks[0].shape, dtype="int")
-            for c in range(data.shape[1]):
-                cell_roi = self.roi_masks[c, :, :].astype("int")
-                # set roi cells to 1 or -1 depending on significance
-                if data[0, c] == 0:
-                    cell_roi *= -1
-                # set roi cells to (-)2 if cell is complex
-                if data[1, c] == 1:
-                    cell_roi *= 2
-                mask = np.where(mask == 0, cell_roi, mask)
-            bounds = [-2.5, -1.5, -0.5, 0.5, 1.5, 2.5]
-            legend_patches = [
-                mpatches.Patch(color=colors[0], label="Not Significant - Complex Cell"),
-                mpatches.Patch(color=colors[1], label="Not Significant - Simple Cell"),
-                mpatches.Patch(color=colors[3], label="Significant - Simple Cell"),
-                mpatches.Patch(color=colors[4], label="Significant - Complex Cell"),
-            ]
+            # just show single cells and complex cells
+            if data.ndim == 1:
+                for c in range(data.size):
+                    cell_roi = self.roi_masks[c, :, :].astype("int")
+                    # set roi cells to 1 or -1 depending on type
+                    if data[c] == 0:
+                        cell_roi *= -1
+                    mask = np.where(mask == 0, cell_roi, mask)
+                tab_idx = [0, 15, 6]
+                colors = [get_color(i) for i in tab_idx]
+                bounds = [-1.5, -0.5, 0.5, 1.5]
+                legend_patches = [
+                    mpatches.Patch(color=colors[0], label="Simple Cell"),
+                    mpatches.Patch(color=colors[2], label="Complex Cell"),
+                ]
+            # show significance and type of cells
+            else:
+                for c in range(data.shape[1]):
+                    cell_roi = self.roi_masks[c, :, :].astype("int")
+                    # set roi cells to 1 or -1 depending on significance
+                    if data[0, c] == 0:
+                        cell_roi *= -1
+                    # set roi cells to (-)2 if cell is complex
+                    if data[1, c] == 1:
+                        cell_roi *= 2
+                    mask = np.where(mask == 0, cell_roi, mask)
+                    
+                tab_idx = [0, 1, 15, 7, 6]
+                colors = [get_color(i) for i in tab_idx]
+                bounds = [-2.5, -1.5, -0.5, 0.5, 1.5, 2.5]
+                legend_patches = [
+                    mpatches.Patch(color=colors[0], label="Not Significant - Complex Cell"),
+                    mpatches.Patch(color=colors[1], label="Not Significant - Simple Cell"),
+                    mpatches.Patch(color=colors[3], label="Significant - Simple Cell"),
+                    mpatches.Patch(color=colors[4], label="Significant - Complex Cell"),
+                ]
         else:
             tab_idx = [15, 1, 3, 7, 9, 0, 2, 6, 8]
-            colors = [tab_cmap(i) for i in tab_idx]
+            colors = [get_color(i) for i in tab_idx]
             bounds = [-1.5, -0.5, 22.5, 67.5, 112.5, 157.5, 202.5, 247.5, 292.5, 337.5]
             mask = np.ones(self.roi_masks[0].shape, dtype="float") * -1
             for c in range(len(data)):
                 cell_roi = self.roi_masks[c, :, :].astype("float")
-                cell_roi *= float(data[c])
                 # set all zeros to -1
                 cell_roi = np.where(cell_roi == 0, -1, cell_roi)
+                # set all ones to data[c]
+                cell_roi = np.where(cell_roi == 1, float(data[c]), cell_roi)
                 # apply corresponding value of cell_roi to mask where cell_roi is not 0.
                 mask = np.where(mask == -1.0, cell_roi, mask)
             legend_patches = [
@@ -555,7 +578,9 @@ class Visualization:
         fig, ax = plt.subplots(1, 1, figsize=(10, 10))
         ax.imshow(mask, cmap=cmap, norm=norm, interpolation="none")
         ax.set_title(title)
-        ax.axis("off")
+        # set x and yticks off
+        ax.set_xticks([])
+        ax.set_yticks([])
         plt.legend(handles=legend_patches, loc="upper center")
         plt.show()
 
@@ -630,6 +655,55 @@ class Visualization:
         oridir_string = "Direction" if direction else "Orientation"
         plt.suptitle(f"Permutation Test {oridir_string} Tuning of Neuron {cellIdx}")
         plt.tight_layout()
+        plt.show()
+
+    def plot_p_distribution(self, df_or: pd.DataFrame, df_dir: pd.DataFrame, hist=True) -> None:
+        """
+        Plot either the histogram or scatter plot of the p-values of the orientation and direction tuning. 
+        
+        Parameters
+        ----------
+        df_dir: pd.DataFrame
+            DataFrame containing the p-values of the direction tuned neurons.
+        df_or: pd.DataFrame
+            DataFrame containing the p-values of the orientation tuned neurons.
+        """
+        data = [df_or, df_dir]
+        columns = ["p_val_1", "p_val_2", "p_val_4", "p_val_8", "p_val_15", "p_val_-1"]
+        freqs = ["1 Hz", "2 Hz", "4 Hz", "8 Hz", "15 Hz", "All Frequencies"]
+
+        fig = plt.figure(figsize=(15, 5), constrained_layout=True)
+        subfigs = fig.subfigures(2, 1)
+        for i, subfig in enumerate(subfigs):
+            subfig.suptitle(
+                "Orientation Tuned Neurons" if i == 0 else "Direction Tuned Neurons"
+            )
+            df = data[i]
+            axs = subfig.subplots(1, 6)
+            for col, ax in enumerate(axs):
+                if hist:
+                    ax.hist(df[columns[col]], bins=30, color="blue", alpha=0.7)
+                    ax.set_xlim(0, 1)
+                    ax.set_ylim(0, 80)
+                    if i == 1:
+                        ax.set_xlabel("p-value")
+                        ax.set_ylim(0, 60)
+                    if col == 0:
+                        ax.set_ylabel("Frequency")
+                else:
+                    ax.scatter(
+                        np.arange(len(df[columns[col]])),
+                        df[columns[col]],
+                        color="blue",
+                        alpha=0.7,
+                        s=3,
+                    )
+                    if i == 1:
+                        ax.set_xlabel("Cell")
+                    if col == 0:
+                        ax.set_ylabel("p-value")
+                ax.set_title(f"{freqs[col]}")
+        plt.suptitle("Distribution of p-values", fontsize=16)
         plt.show()
 
     ################################################################################################

@@ -432,44 +432,89 @@ def get_running_periods_table(running_periods: np.array) -> pd.DataFrame:
     running_periods_table = pd.DataFrame({"stimulus": ["running"] * len(start_indices), "start": start_indices, "end": stop_indices})
     return running_periods_table
 
-def analyze_spike_running_correlation(spiketrains, running_period):
-    n_cells, n_measurements = spiketrains.shape
+# TODO die funktion ist glaub überflüssig
+# def analyze_spike_running_correlation(spiketrains, running_period):
+#     n_cells, n_measurements = spiketrains.shape
 
-    # Ensure running_period is boolean
-    running_period = running_period.astype(bool)
+#     # Ensure running_period is boolean
+#     running_period = running_period.astype(bool)
 
-    # Initialize lists to store results
-    p_values = []
+#     # Initialize lists to store results
+#     p_values = []
 
-    # Iterate over each cell to perform the statistical test
-    for cell in range(n_cells):
-        # Get spikes for running and non-running periods
-        spikes_running = spiketrains[cell, running_period]
-        spikes_non_running = spiketrains[cell, ~running_period]
+#     # Iterate over each cell to perform the statistical test
+#     for cell in range(n_cells):
+#         # Get spikes for running and non-running periods
+#         spikes_running = spiketrains[cell, running_period]
+#         spikes_non_running = spiketrains[cell, ~running_period]
 
-        # Calculate the average spike rate during running and non-running periods
-        rate_running = np.mean(spikes_running)
-        rate_non_running = np.mean(spikes_non_running)
+#         # Calculate the average spike rate during running and non-running periods
+#         rate_running = np.mean(spikes_running)
+#         rate_non_running = np.mean(spikes_non_running)
 
-        # Perform unpaired statistical test
-        if np.var(spikes_running) == 0 or np.var(spikes_non_running) == 0:
-            # If there's no variation, set p-value to 1.0
-            p_value = 1.0
-        else:
-            # Use independent t-testa
-            t_stat, p_value = ttest_ind(
-                spikes_running, spikes_non_running, equal_var=False
-            )
+#         # Perform unpaired statistical test
+#         if np.var(spikes_running) == 0 or np.var(spikes_non_running) == 0:
+#             # If there's no variation, set p-value to 1.0
+#             p_value = 1.0
+#         else:
+#             # Use independent t-testa
+#             t_stat, p_value = ttest_ind(
+#                 spikes_running, spikes_non_running, equal_var=False
+#             )
 
-        p_values.append(p_value)
+#         p_values.append(p_value)
 
-    # Apply multiple comparisons correction (Bonferroni)
-    corrected_p_values = smm.multipletests(p_values, method="bonferroni")[1]
+#     # Apply multiple comparisons correction (Bonferroni)
+#     corrected_p_values = smm.multipletests(p_values, method="bonferroni")[1]
 
-    # Identify significant cells
-    significant_cells = np.where(corrected_p_values < 0.05)[0]
+#     # Identify significant cells
+#     significant_cells = np.where(corrected_p_values < 0.05)[0]
 
-    return significant_cells, corrected_p_values
+#     return significant_cells, corrected_p_values
+
+def get_running_correlation_max(roi_masks, inferred_spikes, running_speed):
+    """
+    Calculate the correlation between the running speed and the activity of each cell.
+    The correlation is then applied to the roi masks of the cells.
+    The top 10 absolute correlation values are returned.
+
+    Parameters
+    ----------
+    roi_masks: np.array
+        The roi masks of the cells.
+    inferred_spikes: dict
+        The inferred spikes of the cells.
+    running_speed: np.array
+        The running speed of the mouse.
+
+    Returns
+    -------
+    roi_masks_corr_sum: np.array
+        The sum of the roi masks with the correlation values applied.
+    top_10: np.array
+        The top 10 absolute correlation values.
+    """
+    roi_masks_copy = roi_masks.copy()
+    roi_masks_corr = np.zeros_like(roi_masks_copy, dtype=np.float64)
+    cell_cor = np.zeros(roi_masks_copy.shape[0])
+    for cell in range(roi_masks_copy.shape[0]):
+        corr, p = pearsonr(inferred_spikes["binspikes"][cell], running_speed)
+        roi_masks_corr[cell, :, :] = np.where(
+            roi_masks_copy[cell, :, :].astype(np.float64) < 1,
+            roi_masks_copy[cell, :, :],
+            corr,
+        )
+        cell_cor[cell] = corr
+
+    roi_masks_sum = np.sum(roi_masks_copy, axis=0)
+    roi_masks_sum = roi_masks_sum / np.max(roi_masks_sum)
+
+    roi_masks_corr_sum = np.sum(roi_masks_corr, axis=0)
+    roi_masks_corr_sum = roi_masks_corr_sum / np.max(roi_masks_corr_sum)
+
+    # get the top 10 correlation values
+    top_10 = np.argsort(np.abs(cell_cor))[-10:]
+    return roi_masks_corr_sum, top_10
 
 ### Visualization Helper
 def get_epochs_in_range(stim_epoch_table: pd.DataFrame, start: int = 0, end: int = 105967) -> pd.DataFrame:
