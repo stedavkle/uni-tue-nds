@@ -4,7 +4,7 @@ import pandas as pd
 import matplotlib.pyplot as plt
 import matplotlib.transforms as transforms
 import matplotlib.patches as mpatches
-from matplotlib.colors import ListedColormap, BoundaryNorm
+from matplotlib.colors import ListedColormap, BoundaryNorm, TwoSlopeNorm
 from IPython.display import display, Image, clear_output
 import seaborn as sns
 import warnings
@@ -34,6 +34,11 @@ class Visualization:
         Set the processed spikes data, used in functions:
             - update_stimulus_spike_times
         """
+        self.inferred_spikes = inferred_spikes.copy()
+
+    def remove_cell_105(self, dff: np.array, roi_masks: np.array, inferred_spikes: dict) -> None:
+        self.dff = dff.copy()
+        self.roi_masks = roi_masks.copy()
         self.inferred_spikes = inferred_spikes.copy()
 
     ################################################################################################
@@ -809,6 +814,28 @@ class Visualization:
         plt.title(
             f"Significant {ordir_string} Tuned Neurons (at Significance Level {p_thresh})"
         )
+        plt.show()
+
+    def plot_cell_running_correlation(self, roi_corr: np.array) -> None:
+        """ 
+        Plot the correlation of each cell with the running activity.
+
+        Parameters
+        ----------
+        roi_corr : np.array
+            ROI correlation matrix of shape roi_masks[0].shape
+        """
+        max_abs_val = np.max(np.abs(roi_corr))
+        norm = TwoSlopeNorm(vmin=-max_abs_val, vcenter=0, vmax=max_abs_val)
+
+        fig, axs = plt.subplots(1, 1, figsize=(10, 10))
+        im = axs.imshow(roi_corr, cmap="bwr", norm=norm, interpolation="none")
+        cbar = fig.colorbar(im, ax=axs, shrink=0.8)
+        cbar.set_label("Correlation Value")
+
+        axs.set_title("Correlation of Each Cell with Running Activity")
+        axs.set_xticks([])
+        axs.set_yticks([])
         plt.show()
 
     ################################################################################################

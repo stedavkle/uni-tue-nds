@@ -474,7 +474,7 @@ def get_running_periods_table(running_periods: np.array) -> pd.DataFrame:
 
 #     return significant_cells, corrected_p_values
 
-def get_running_correlation_max(roi_masks, inferred_spikes, running_speed):
+def get_running_correlation_max(roi_masks: np.array, inferred_spikes: np.array, running_speed: np.array):
     """
     Calculate the correlation between the running speed and the activity of each cell.
     The correlation is then applied to the roi masks of the cells.
@@ -484,7 +484,7 @@ def get_running_correlation_max(roi_masks, inferred_spikes, running_speed):
     ----------
     roi_masks: np.array
         The roi masks of the cells.
-    inferred_spikes: dict
+    inferred_spikes: np.array
         The inferred spikes of the cells.
     running_speed: np.array
         The running speed of the mouse.
@@ -499,26 +499,20 @@ def get_running_correlation_max(roi_masks, inferred_spikes, running_speed):
         The top 10 absolute correlation values.
     """
     roi_masks_copy = roi_masks.copy()
-    roi_masks_corr = np.zeros_like(roi_masks_copy, dtype=np.float64)
+    # roi_masks_copy = np.where(roi_masks_copy == 0, -2, roi_masks_copy)
+
+    #roi_masks_corr = np.zeros_like(roi_masks_copy, dtype=np.float64)
     cell_corr = np.zeros(roi_masks_copy.shape[0])
+    mask = np.zeros(roi_masks_copy[0].shape, dtype=np.float64)
     for cell in range(roi_masks_copy.shape[0]):
-        corr, p = pearsonr(inferred_spikes["binspikes"][cell], running_speed)
-        roi_masks_corr[cell, :, :] = np.where(
-            roi_masks_copy[cell, :, :].astype(np.float64) < 1,
-            roi_masks_copy[cell, :, :],
-            corr,
-        )
+        corr, p = pearsonr(inferred_spikes[cell], running_speed)
+        cell_roi = roi_masks_copy[cell].astype(np.float64)
+        cell_roi *= corr
+        mask = np.where(mask == 0.0, cell_roi, mask)
         cell_corr[cell] = corr
-
-    roi_masks_sum = np.sum(roi_masks_copy, axis=0)
-    roi_masks_sum = roi_masks_sum / np.max(roi_masks_sum)
-
-    roi_masks_corr_sum = np.sum(roi_masks_corr, axis=0)
-    roi_masks_corr_sum = roi_masks_corr_sum / np.max(roi_masks_corr_sum)
-
     # get the top 10 correlation values
-    top_10 = np.argsort(np.abs(cell_corr))[-10:]
-    return roi_masks_corr_sum, cell_corr, top_10
+    top_10 = np.argsort(-np.abs(cell_corr))[:10]
+    return mask, cell_corr, top_10
 
 ### Visualization Helper
 def get_epochs_in_range(stim_epoch_table: pd.DataFrame, start: int = 0, end: int = 105967) -> pd.DataFrame:
@@ -1116,13 +1110,12 @@ def kolmogorovTest(df:pd.DataFrame(),
     
 def process_permutation(i, stim_table, inferred_spikes, neuron):
     permuted_frequencies = np.random.permutation(
-        stim_table["temporal_frequency"]
+        stim_table["temporal_frequency"].dropna()
     )
     spike_count_by_freq = get_spike_count_by_freq(
         stim_table, permuted_frequencies, inferred_spikes, neuron
     )
     return get_test(spike_count_by_freq)
-
 
 def get_p_values_permutation_test_helper(inferred_spikes, stim_table, n_permutations, n_jobs=-1):
     neuron_stats = {}
@@ -1138,12 +1131,33 @@ def get_p_values_permutation_test_helper(inferred_spikes, stim_table, n_permutat
         neuron_stats[neuron] = get_test(spike_count_by_freq)
 
         results = Parallel(n_jobs=n_jobs)(
-            delayed(process_permutation)(i, stim_table.copy().dropna(), inferred_spikes, neuron)
+            delayed(process_permutation)(i, stim_table, inferred_spikes, neuron)
             for i in range(n_permutations)
         )
         permuted_stats[neuron] = np.array(results)  # Store as numpy array
 
     return neuron_stats, permuted_stats
+
+# def get_p_values_permutation_test_helper(inferred_spikes, stim_table, n_permutations, n_jobs=-1):
+#     neuron_stats = {}
+#     permuted_stats = {}
+
+#     for neuron in range(inferred_spikes["binspikes"].shape[0]):
+#         spike_count_by_freq = get_spike_count_by_freq(
+#             stim_table,
+#             stim_table["temporal_frequency"].dropna().values,
+#             inferred_spikes,
+#             neuron,
+#         )
+#         neuron_stats[neuron] = get_test(spike_count_by_freq)
+
+#         results = Parallel(n_jobs=n_jobs)(
+#             delayed(process_permutation)(i, stim_table.copy().dropna(), inferred_spikes, neuron)
+#             for i in range(n_permutations)
+#         )
+#         permuted_stats[neuron] = np.array(results)  # Store as numpy array
+
+#     return neuron_stats, permuted_stats
 
 def get_spike_count_by_freq(stim_table, frequencies, inferred_spikes, neuron=0):
     """
