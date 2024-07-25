@@ -11,6 +11,7 @@ import pickle
 from oasis.functions import deconvolve
 from oasis.oasis_methods import oasisAR1, oasisAR2
 from joblib import Parallel, delayed
+import copy
 
 ### helper functions for accessing data
 
@@ -608,10 +609,6 @@ def negloglike_lnp(
 
     """
 
-    # ------------------------------------------------
-    # Implement the negative log-likelihood of the LNP
-    # ------------------------------------------------
-
     # compute dot product of w and s
     ws = np.dot(w, s)
     # compute the mean rate in time bins
@@ -640,11 +637,6 @@ def deriv_negloglike_lnp(
       gradient of the negative log likelihood with respect to w
 
     """
-
-    # --------------------------------------------------------------
-    # Implement the gradient with respect to the receptive field `w`
-    # --------------------------------------------------------------
-
     # compute dot product of w and s
     ws = np.dot(w, s)
     # compute the mean rate in time bins
@@ -713,11 +705,11 @@ def fitTemporalTuningCurve(
     starts = stim_table["start"].astype(int).to_numpy()
     ends = stim_table["end"].astype(int).to_numpy()
 
-    dirs = stim_table["orientation"].dropna()
+    dirs = stim_table["orientation"].copy().dropna()
     unique_directions = np.unique(dirs).astype(int)
     unique_directions.sort()
 
-    temporal_frequencies = stim_table["temporal_frequency"].dropna()
+    temporal_frequencies = stim_table["temporal_frequency"].copy().dropna()
     unique_temporal_frequencies = np.unique(temporal_frequencies).astype(int)
     unique_temporal_frequencies.sort()
 
@@ -774,36 +766,22 @@ def getMaxOfTemporalTuningCurves(
     tuning_curve_fit: dict,
     stim_table,
 ):
+    stim_table = stim_table.copy()
     unique_dirs = np.unique(stim_table["orientation"].dropna())
     unique_dirs.sort()
     unique_temps = np.unique(stim_table["temporal_frequency"].dropna())
     unique_temps.sort()
     results = {}
     for neuron in tuning_curve_fit.keys():
-        fitted_curves = tuning_curve_fit[neuron]["fitted_curves"].copy()
+        fitted_curves = copy.deepcopy(tuning_curve_fit[neuron]["fitted_curves"])
         max_curve_idx_for_all_directions = np.argmax(fitted_curves, axis=0)
         max_direction_idx = np.argmax(np.max(fitted_curves, axis=0))
-
-        # print(
-        #     max_curve_idx_for_all_directions,
-        #     np.max(fitted_curves, axis=0),
-        #     max_direction_idx,
-        # )
-        # print(
-        #     tuning_curve_fit[neuron]["fitted_curves"][
-        #         max_curve_idx_for_all_directions[max_direction_idx]
-        #     ]
-        # )
 
         # remove the maximum direction from the list and get the second maximum
         fitted_curves[
             max_curve_idx_for_all_directions[max_direction_idx], max_direction_idx
         ] = 0
-        # print(
-        #     tuning_curve_fit[neuron]["fitted_curves"][
-        #         max_curve_idx_for_all_directions[max_direction_idx]
-        #     ]
-        # )
+
         max_direction_idx2 = np.argmax(
             fitted_curves[
                 max_curve_idx_for_all_directions[max_direction_idx]
@@ -877,18 +855,27 @@ def testTuningFunction_opt(
             q = np.abs(np.dot(m_k, v_k))
 
             rng = np.random.default_rng(random_seed)
-            # Parallelize the inner loop
-            def process_iteration(i):
+
+#             # Parallelize the inner loop
+#             def process_iteration(i):
+#                 shuffled_counts = rng.permutation(spike_counts)
+#                 shuffled_m_k = np.array(
+#                     [np.mean(shuffled_counts[dirs == d]) for d in unique_directions]
+#                 )
+#                 return np.abs(np.dot(shuffled_m_k, v_k))
+
+#             qdistr_values = Parallel(n_jobs=-1)(
+#                 delayed(process_iteration)(i) for i in range(niters)
+#             )
+#             qdistr[neuron, tf, :] = np.array(qdistr_values)
+
+            for i in range(niters):
                 shuffled_counts = rng.permutation(spike_counts)
                 shuffled_m_k = np.array(
                     [np.mean(shuffled_counts[dirs == d]) for d in unique_directions]
                 )
-                return np.abs(np.dot(shuffled_m_k, v_k))
+                qdistr[neuron, tf, i] = np.abs(np.dot(shuffled_m_k, v_k))
 
-            qdistr_values = Parallel(n_jobs=-1)(
-                delayed(process_iteration)(i) for i in range(niters)
-            )
-            qdistr[neuron, tf, :] = np.array(qdistr_values)
             p = np.sum(qdistr[neuron, tf, :] >= q) / niters
             result[neuron][temporal_frequency] = {
                 "p": p,
@@ -1094,7 +1081,7 @@ def process_tuning_data(
 
     return df_or, df_complex, df_non_complex, comp_or, noncomp_or, comp_dir, noncomp_dir
 
-def kolomogrovTest(df:pd.DataFrame(),
+def kolmogorovTest(df:pd.DataFrame(),
                    df2:pd.DataFrame() = None,
                    columns: list = ["p_val_1", "p_val_2", "p_val_4", "p_val_8", "p_val_15", "p_val_-1"],
                    base_column: str = "p_val_-1") -> pd.DataFrame():
@@ -1129,7 +1116,7 @@ def kolomogrovTest(df:pd.DataFrame(),
     
 def process_permutation(i, stim_table, inferred_spikes, neuron):
     permuted_frequencies = np.random.permutation(
-        stim_table["temporal_frequency"].dropna()
+        stim_table["temporal_frequency"]
     )
     spike_count_by_freq = get_spike_count_by_freq(
         stim_table, permuted_frequencies, inferred_spikes, neuron
@@ -1151,7 +1138,7 @@ def get_p_values_permutation_test_helper(inferred_spikes, stim_table, n_permutat
         neuron_stats[neuron] = get_test(spike_count_by_freq)
 
         results = Parallel(n_jobs=n_jobs)(
-            delayed(process_permutation)(i, stim_table, inferred_spikes, neuron)
+            delayed(process_permutation)(i, stim_table.copy().dropna(), inferred_spikes, neuron)
             for i in range(n_permutations)
         )
         permuted_stats[neuron] = np.array(results)  # Store as numpy array

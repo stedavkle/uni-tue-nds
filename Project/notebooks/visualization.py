@@ -11,13 +11,13 @@ import warnings
 
 class Visualization:
     def __init__(self, data: dict):
-        self.t = data["t"]
-        self.dff = data["dff"]
-        self.stim_table = data["stim_table"]
-        self.roi_masks = data["roi_masks"]
-        self.max_projection = data["max_projection"]
+        self.t = data["t"].copy()
+        self.dff = data["dff"].copy()
+        self.stim_table = data["stim_table"].copy()
+        self.roi_masks = data["roi_masks"].copy()
+        self.max_projection = data["max_projection"].copy()
         self.running_speed = np.nan_to_num(data["running_speed"][0], nan=0)
-        self.stim_epoch_table = data["stim_epoch_table"]
+        self.stim_epoch_table = data["stim_epoch_table"].copy()
         self.stim_table["start"] = self.stim_table["start"].astype(int)
         self.stim_table["end"] = self.stim_table["end"].astype(int)
         self.fs = 1 / np.mean(np.diff(self.t))
@@ -34,7 +34,7 @@ class Visualization:
         Set the processed spikes data, used in functions:
             - update_stimulus_spike_times
         """
-        self.inferred_spikes = inferred_spikes
+        self.inferred_spikes = inferred_spikes.copy()
 
     ################################################################################################
     ##### input functions (slider, dropdown, etc.)
@@ -413,8 +413,8 @@ class Visualization:
     def update_temporal_tuning_curve(self, cellIdx: int, temporal_tunings: np.array) -> None:
         x = np.arange(temporal_tunings.shape[2])
 
-        temporal_tuning_mean = temporal_tunings[0, cellIdx, :]
-        temporal_tuning_sd = temporal_tunings[1, cellIdx, :]
+        temporal_tuning_mean = temporal_tunings[0, cellIdx, :].copy()
+        temporal_tuning_sd = temporal_tunings[1, cellIdx, :].copy()
 
         fig, ax = plt.subplots(figsize=(5, 4))
         ax.errorbar(
@@ -433,9 +433,9 @@ class Visualization:
         plt.show()
 
     def update_directional_tuning_curve(self, cellIdx: int, tuning_curve_fit: dict) -> None:
-        fitted_curves = tuning_curve_fit[cellIdx]["fitted_curves"]
-        mean_spike_counts = tuning_curve_fit[cellIdx]["mean_spike_counts"]
-        std_counts = tuning_curve_fit[cellIdx]["std_spike_counts"]
+        fitted_curves = tuning_curve_fit[cellIdx]["fitted_curves"].copy()
+        mean_spike_counts = tuning_curve_fit[cellIdx]["mean_spike_counts"].copy()
+        std_counts = tuning_curve_fit[cellIdx]["std_spike_counts"].copy()
         fig, ax = plt.subplots(figsize=(7, 5))
         # Plot average spike count per direction
         ax.plot(
@@ -822,7 +822,7 @@ class Visualization:
             end = len(self.t)-1
         with warnings.catch_warnings():
             warnings.simplefilter("ignore")
-            grating_epochs = self.stim_epoch_table[self.stim_epoch_table["stimulus"] == "drifting_gratings"]
+            grating_epochs = self.stim_epoch_table[self.stim_epoch_table["stimulus"] == "drifting_gratings"].copy()
             # pop out all rows where either start and end are outside the interval, 
             # start is inside the interval or end is inside the interval
             grating_epochs = grating_epochs[~((grating_epochs["start"] > end) | (grating_epochs["end"] < start))]
@@ -912,9 +912,9 @@ class Visualization:
             stimulus_epochs = self.stim_table[
                 (self.stim_table["orientation"] == orientation)
                 & (self.stim_table["temporal_frequency"] == frequency)
-            ]
+            ].copy()
         else:
-            stimulus_epochs = self.stim_table[self.stim_table["blank_sweep"] == 1.0]
+            stimulus_epochs = self.stim_table[self.stim_table["blank_sweep"] == 1.0].copy()
 
         # create binary mask for the entire experiment time with 1s for the stimulus epochs
         epochs_mask = np.zeros(self.inferred_spikes["spikes"].shape[1], dtype=int)
