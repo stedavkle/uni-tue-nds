@@ -774,6 +774,7 @@ def getMaxOfTemporalTuningCurves(
     tuning_curve_fit: dict,
     stim_table,
 ):
+    stim_table = stim_table.copy()
     unique_dirs = np.unique(stim_table["orientation"].dropna())
     unique_dirs.sort()
     unique_temps = np.unique(stim_table["temporal_frequency"].dropna())
