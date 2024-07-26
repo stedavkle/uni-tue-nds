@@ -1,11 +1,10 @@
-from ipywidgets import IntSlider, FloatRangeSlider, Checkbox, Layout, interact, Dropdown
+from ipywidgets import IntSlider, FloatRangeSlider, Checkbox, Layout, Dropdown
 import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
 import matplotlib.transforms as transforms
 import matplotlib.patches as mpatches
 from matplotlib.colors import ListedColormap, BoundaryNorm, TwoSlopeNorm
-from IPython.display import display, Image, clear_output
 import seaborn as sns
 import warnings
 
@@ -31,12 +30,14 @@ class Visualization:
 
     def set_inferred_spikes(self, inferred_spikes: dict) -> None:
         """ 
-        Set the processed spikes data, used in functions:
-            - update_stimulus_spike_times
+        Set the processed spikes data.
         """
         self.inferred_spikes = inferred_spikes.copy()
 
     def remove_cell_105(self, dff: np.array, roi_masks: np.array, inferred_spikes: dict) -> None:
+        """
+        Remove Neuron 105 from the data.
+        """
         self.dff = dff.copy()
         self.roi_masks = roi_masks.copy()
         self.inferred_spikes = inferred_spikes.copy()
@@ -48,8 +49,18 @@ class Visualization:
     def time_interval_slider(self, value: list[float, float]=None, update: bool=False) -> FloatRangeSlider:
         """
         Create a FloatRangeSlider for selecting a time interval.
-        :param value: Initial value [a, b]
-        :param update: Update plot only on releasing the slider
+        
+        Parameters
+        ----------
+        value: list[float, float], optional
+            Initial value [a, b], by default None
+        update: bool, optional
+            Update plot only on releasing the slider, by default
+
+        Returns
+        -------
+        FloatRangeSlider
+            FloatRangeSlider for selecting a time interval.
         """
         if value is None:
             value = [0, self.t[-1]]
@@ -71,8 +82,18 @@ class Visualization:
     def cell_index_slider(self, value: int=0, update: bool=False) -> IntSlider:
         """
         Create an IntSlider for selecting a cell index.
-        :param value: Initial value
-        :param update: Update plot only on releasing the slider
+        
+        Parameters
+        ----------
+        value: int, optional
+            Initial value, by default 0
+        update: bool, optional
+            Update plot only on releasing the slider, by default False
+
+        Returns
+        -------
+        IntSlider
+            IntSlider for selecting a cell index.
         """
         if value < 0:
             value = 0
@@ -83,7 +104,7 @@ class Visualization:
             min=0,  # Minimum value
             max=self.dff.shape[0] - 1,  # Maximum value based on number of cells
             step=1,  # Step size
-            description="Cell Index:",  # Slider label
+            description="Neuron Index:",  # Slider label
             continuous_update=update,  # Update plot only on releasing the slider
             layout=Layout(width="99%"),  # Adjust the layout width
         )
@@ -91,8 +112,20 @@ class Visualization:
     def checkbox(self, value: bool=False, description: str="PLACEHOLDER", update: bool=False) -> Checkbox:
         """
         Create a Checkbox.
-        :param value: Initial value
-        :param update: Update plot only on releasing the slider
+        
+        Parameters
+        ----------
+        value: bool, optional
+            Initial value, by default False
+        description: str, optional
+            Checkbox label, by default "PLACEHOLDER"
+        update: bool, optional
+            Update plot only on releasing the checkbox, by default False
+
+        Returns
+        -------
+        Checkbox
+            Checkbox.
         """
         return Checkbox(
             value=value,  # Initial value
@@ -104,6 +137,16 @@ class Visualization:
     def frequency_dropdown(self, value: float=0.0) -> Dropdown:
         """
         Create a Dropdown for selecting a frequency.
+
+        Parameters
+        ----------
+        value: float, optional
+            Initial value, by default 0.0
+
+        Returns
+        -------
+        Dropdown
+            Dropdown for selecting a frequency
         """
         frequencies = [('All Frequencies', 0.0)]
         frequencies.extend([(f"{f} Hz", f) for f in self.frequencies])
@@ -118,8 +161,6 @@ class Visualization:
     ################################################################################################
     ##### plot update functions
     ################################################################################################
-
-
     def update_raw_activity_traces_plot(
         self, 
         cellIdx: int, 
@@ -142,7 +183,7 @@ class Visualization:
         end = min(int(sample_range[1] * self.fs), len(self.t) - 1)
         fig, axs = plt.subplots(2, 1, figsize=(10, 4), height_ratios=[2, 1])
         axs[0].plot(self.t[start:end], self.dff[cellIdx, start:end], color="blue")
-        axs[0].set_title(f"Raw Activity Trace of Cell {cellIdx}")
+        axs[0].set_title(f"Raw Activity Trace of Neuron {cellIdx}")
         axs[0].set_ylabel("Activity")
         axs[0].set_ylim([np.min(self.dff[cellIdx, :] - 0.2), np.max(self.dff[cellIdx, :]) + 0.2])
         axs[0].set_xlim([self.t[start], self.t[end]])
@@ -178,11 +219,20 @@ class Visualization:
     ) -> None:
         """
         Update the plot with the filtering stages of the cell activity traces.
-        :param cellIdx: Cell index
-        :param sample_range: Sample range [a, b]
-        :param dff_butter: Butterworth filtered activity traces; provide fixed values
-        :param dff_wiener: Wiener filtered activity traces; provide fixed values
-        :param dff_both: Butterworth and Wiener filtered activity traces; provide fixed values 
+        
+        Parameters
+        ----------
+
+        cellIdx : int
+            Index of the cell to plot
+        sample_range : list[float, float]
+            Range of samples to plot [a, b] in seconds
+        dff_butter : np.array
+            Butterworth filtered activity traces
+        dff_wiener : np.array
+            Wiener filtered activity traces
+        dff_both : np.array
+            Butterworth and Wiener filtered activity traces
         """
         start = max(int(sample_range[0] * self.fs), 0)
         end = min(int(sample_range[1] * self.fs), len(self.t) - 1)
@@ -219,7 +269,7 @@ class Visualization:
         )
         # y label
         fig.text(0.04, 0.5, "Activity", va="center", rotation="vertical")
-        fig.suptitle(f"Filtering Stages of Cell {cellIdx} Activity Traces")
+        fig.suptitle(f"Filtering Stages of Neuron {cellIdx} Activity Traces")
         plt.show()
 
     def update_inferred_spikes_plot(
@@ -232,6 +282,26 @@ class Visualization:
         oasis_spikes,
         input_trace: np.array,
     ) -> None:
+        """
+        Plot comparing the deconvolution and spike inference of the cell activity traces.
+
+        Parameters
+        ----------
+        cellIdx : int
+            Index of the cell to plot
+        sample_range : list[float, float]
+            Range of samples to plot [a, b] in seconds
+        show_oopsi : bool
+            Show the OOPSI deconvolution, by default False
+        show_oasis : bool
+            Show the OASIS deconvolution, by default False
+        oopsi_spikes : dict
+            OOPSI deconvolution and spike inference data
+        oasis_spikes : dict
+            OASIS deconvolution and spike inference data
+        input_trace : np.array
+            Input trace of the cell
+        """
         start = max(int(sample_range[0] * self.fs), 0)
         end = min(int(sample_range[1] * self.fs), len(self.t) - 1)
         fig, axs = plt.subplots(4, 1, figsize=(15, 10), height_ratios=[3, 3, 3, 1])
@@ -282,7 +352,7 @@ class Visualization:
         for ax in axs:
             ax.set_xlim([self.t[start], self.t[end]])
 
-        fig.suptitle(f"Cell {cellIdx} - Deconvolution and Spike Inference")
+        fig.suptitle(f"Neuron {cellIdx} - Deconvolution and Spike Inference")
         if show_oopsi and show_oasis:
             axs[0].legend(loc="upper left")
         plt.tight_layout()
@@ -291,6 +361,15 @@ class Visualization:
     def update_stimulus_spike_times(self, cellIdx: int, frequency: int, histogram: bool=False) -> None:
         """
         Plot with the spike times of a cell per orientation and trial.
+
+        Parameters
+        ----------
+        cellIdx : int
+            Index of the cell to plot
+        frequency : int
+            Temporal frequency of the stimulus
+        histogram : bool, optional
+            Plot a histogram of the spikes, by default False
         """
         if frequency == 0.0:
             stimulus_epochs = self.stim_table[self.stim_table["blank_sweep"] == 0.0].copy()
@@ -333,7 +412,7 @@ class Visualization:
                 axs.set_xticks(np.linspace(0, len(stimulus_times), 9))
                 axs.set_xticklabels(np.arange(0.0, 2.25, step=0.25))
                 axs.set_title(
-                    f"Spike Density of Cell {cellIdx} per Orientation - {freq_string}"
+                    f"Spike Density of Neuron {cellIdx} per Orientation - {freq_string}"
                 )
             else:
                 for t, trial in enumerate(cell_spike_times):
@@ -347,9 +426,8 @@ class Visualization:
                 # x-axis
                 axs.set_xlim(-0.01, 2.0)
                 axs.set_title(
-                    f"Spike Times of Cell {cellIdx} per Orientation and Trial - {freq_string}"
+                    f"Spike Times of Neuron {cellIdx} per Orientation and Trial - {freq_string}"
                 )
-
         axs.set_xlabel("Time [s]")
 
         # y-axis
@@ -366,6 +444,16 @@ class Visualization:
         plt.show()
 
     def update_spikes_per_frequency(self, cellIdx: int, sample_range: list[float, float]) -> None:
+        """
+        Plot the spike times of a cell per temporal frequency.
+
+        Parameters
+        ----------
+        cellIdx : int
+            Index of the cell to plot
+        sample_range : list[float, float]
+            Range of samples to plot [a, b] in seconds
+        """
         start = max(int(sample_range[0] * self.fs), 0)
         end = min(int(sample_range[1] * self.fs), len(self.t) - 1)
         y_step = len(self.frequencies) + 1
@@ -404,7 +492,7 @@ class Visualization:
                 + transforms.ScaledTranslation(0, 0.18, fig.dpi_scale_trans)
             )
 
-        axs.set_title(f"Spike Times of Cell {cellIdx} for Different Orientations")
+        axs.set_title(f"Spike Times of Neuron {cellIdx} for Different Orientations")
         axs.grid(axis="y", alpha=0.5)
         # place legend outside on the right of the plot
         plt.legend(
@@ -416,8 +504,17 @@ class Visualization:
         plt.show()
 
     def update_temporal_tuning_curve(self, cellIdx: int, temporal_tunings: np.array) -> None:
-        x = np.arange(temporal_tunings.shape[2])
+        """
+        Plot the temporal tuning curve of a cell.
 
+        Parameters
+        ----------
+        cellIdx : int
+            Index of the cell to plot
+        temporal_tunings : np.array
+            Temporal tuning curve of the cell
+        """
+        x = np.arange(temporal_tunings.shape[2])
         temporal_tuning_mean = temporal_tunings[0, cellIdx, :].copy()
         temporal_tuning_sd = temporal_tunings[1, cellIdx, :].copy()
 
@@ -430,14 +527,23 @@ class Visualization:
             capsize=5,
             color="blue",
         )
-        # TODO x und y lim
-        ax.set_title(f"Temporal Tuning of Cell {cellIdx}")
+        ax.set_title(f"Temporal Tuning of Neuron {cellIdx}")
         ax.set_xlabel("Temporal Frequency [Hz]")
-        ax.set_ylabel("Mean Value")  # TODO passt dieses label?
+        ax.set_ylabel("Mean and SD")
         ax.set_xticks(ticks=x, labels=self.frequencies)
         plt.show()
 
     def update_directional_tuning_curve(self, cellIdx: int, tuning_curve_fit: dict) -> None:
+        """
+        Plot the directional tuning curve of a cell.
+
+        Parameters
+        ----------
+        cellIdx : int
+            Index of the cell to plot
+        tuning_curve_fit : dict
+            Fitted tuning curves of the cell
+        """
         fitted_curves = tuning_curve_fit[cellIdx]["fitted_curves"].copy()
         mean_spike_counts = tuning_curve_fit[cellIdx]["mean_spike_counts"].copy()
         std_counts = tuning_curve_fit[cellIdx]["std_spike_counts"].copy()
@@ -495,7 +601,7 @@ class Visualization:
         ax.set_ylim(0, np.max(mean_spike_counts + std_counts) + 3)
         ax.set_xlabel("Direction [°]")
         ax.set_ylabel("Spike Count")
-        ax.set_title("Tuning Curve Fit of Cell {}".format(cellIdx))
+        ax.set_title("Tuning Curve Fit of Neuron {}".format(cellIdx))
         ax.legend()
         plt.show()
 
@@ -595,10 +701,17 @@ class Visualization:
     def filtered_running_speed(self, start, end, running_periods: np.array=None, running_smooth: np.array=None) -> None:
         """
         Plot the filtered running speed.
-        :param start: Start time in seconds
-        :param end: End time in seconds
-        :param running_periods: Binary running periods
-        :param running_smooth: Smoothed running speed
+        
+        Parameters
+        ----------
+        start: float
+            Start time in seconds.
+        end: float
+            End time in seconds.
+        running_periods: np.array, optional
+            Binary running periods, by default None
+        running_smooth: np.array, optional
+            Smoothed running speed, by default None
         """
         start = max(int(start * self.fs), 0)
         end = min(int(end * self.fs), len(self.t) - 1)
@@ -634,6 +747,20 @@ class Visualization:
     def plot_tuning_orientation_test(
         self, cellIdx: int, qp_results: dict, qdistr: np.ndarray, direction: bool = False
     ) -> None:
+        """
+        Plot the permutation test results of the orientation tuning of a cell.
+
+        Parameters
+        ----------
+        cellIdx: int
+            Index of the cell to plot
+        qp_results: dict
+            Results of the permutation test
+        qdistr: np.ndarray
+            Distribution of the q-values
+        direction: bool, optional
+            Whether to plot the direction tuning, by default False
+        """
         freq_strings = self.frequencies.copy()
         freq_strings.append(-1)
         fig, axs = plt.subplots(2, 3, figsize=(10, 6))
@@ -694,7 +821,7 @@ class Visualization:
                     ax.set_xlim(0, 1)
                     ax.set_ylim(0, 80)
                     if i == 1:
-                        ax.set_xlabel("p-value")
+                        ax.set_xlabel("p-Value")
                         ax.set_ylim(0, 60)
                     if col == 0:
                         ax.set_ylabel("Frequency")
@@ -707,11 +834,11 @@ class Visualization:
                         s=3,
                     )
                     if i == 1:
-                        ax.set_xlabel("Cell")
+                        ax.set_xlabel("Neuron")
                     if col == 0:
-                        ax.set_ylabel("p-value")
+                        ax.set_ylabel("p-Value")
                 ax.set_title(f"{freqs[col]}")
-        plt.suptitle("Distribution of p-values", fontsize=16)
+        plt.suptitle("Distribution of p-Values", fontsize=16)
         plt.show()
 
     def plot_num_significant_cells(self, comp_or: np.array, noncomp_or: np.array, comp_dir: np.array, noncomp_dir: np.array) -> None:
@@ -738,13 +865,13 @@ class Visualization:
                 x_axis - 0.05,
                 data[i].values,
                 color="blue",
-                label="Complex Neurons",
+                label="Complex Cells",
             )
             ax.scatter(
                 x_axis + 0.05,
                 data[i + 2].values,
                 color="lightblue",
-                label="Simple Neurons",
+                label="Simple Cells",
             )
             ax.set_xticks(x_axis)
             ax.set_xticklabels(keys_str)
@@ -758,8 +885,8 @@ class Visualization:
         plt.suptitle("Number of Significant Neurons for Orientation and Direction Tuning")
         plt.show()
 
-    def plot_significance_heatmap(self, data: pd.DataFrame, p_thresh: float, direction=True):
-        """ 
+    def plot_significance_heatmap(self, data: pd.DataFrame, p_thresh: float, direction=True, temp_freq_idx: np.array=None) -> None:
+        """
         Plot a heatmap of the significance of the tuned neurons.
         The heatmap shows the significance of the tuned neurons for each temporal frequency.
 
@@ -771,10 +898,24 @@ class Visualization:
             The significance threshold.
         direction : bool, optional
             If True, the heatmap is for direction tuned neurons, else for orientation tuned neurons, by default True.
+        temp_freq_idx : np.array, optional
+            The indices of the neurones on which the temporal frequency has a significant effect, by default None
         """
-        colors = ["white", "black"]
+        data = data[self.keys_str].copy()
+
+        ordir_string = "Direction" if direction else "Orientation"
+        if temp_freq_idx is not None:
+            colors = ["white", "black", "lightblue", "blue"]
+            bounds = [-0.5, 0.5, 1.5, 2.5, 3.5]
+
+            for neuron, row in data.iterrows():
+                if neuron in temp_freq_idx:
+                    data.loc[neuron] = data.loc[neuron] + 2
+        else:
+            colors = ["white", "black"]
+            bounds = [-0.5, 0.5, 1.5]
+
         cmap = ListedColormap(colors)
-        bounds = [-0.5, 0.5, 1.5]
         norm = BoundaryNorm(bounds, cmap.N)
 
         plt.figure(figsize=(15, 2))
@@ -795,22 +936,44 @@ class Visualization:
         ax.set_xticklabels([f"{int(tick)}" for tick in xticks[::5]], rotation=0)
         ax.set_yticklabels(["1", "2", "4", "8", "15", "All"], rotation=0)
 
-        legend_elements = [
+        legend_elements_significance = [
             mpatches.Patch(facecolor="white", edgecolor="gray", label="0"),
             mpatches.Patch(facecolor="black", edgecolor="gray", label="1"),
         ]
-        plt.legend(
-            handles=legend_elements,
-            title="Significance",
-            bbox_to_anchor=(1.01, 0.5),
+
+        y_pos = 0.5 if temp_freq_idx is None else 0.70
+        first_legend = plt.legend(
+            handles=legend_elements_significance,
+            title=f"{ordir_string} Significance",
+            bbox_to_anchor=(1.01, y_pos),
             loc="center left",
             borderaxespad=0.0,
             frameon=False,
+            alignment="left",
         )
+
+        # Plot the second legend for temporal frequency significance
+        if temp_freq_idx is not None:
+            legend_elements_temp_freq = [
+                mpatches.Patch(facecolor="lightblue", edgecolor="gray", label=""),
+                mpatches.Patch(facecolor="blue", edgecolor="gray", label=""),
+            ]
+            second_legend = plt.legend(
+                handles=legend_elements_temp_freq,
+                title="Neurons Sensitive to\nTemporal Frequency",
+                bbox_to_anchor=(1.01, 0.28),
+                loc="center left",
+                borderaxespad=0.0,
+                frameon=False,
+                alignment="left",
+                ncols=2,
+                columnspacing=0.2,
+            )
+            ax.add_artist(first_legend)
 
         plt.ylabel("Temporal Frequency [Hz]")
         plt.xlabel("Neurons")
-        ordir_string = "Direction" if direction else "Orientation"
+
         plt.title(
             f"Significant {ordir_string} Tuned Neurons (at Significance Level {p_thresh})"
         )
@@ -833,7 +996,7 @@ class Visualization:
         cbar = fig.colorbar(im, ax=axs, shrink=0.8)
         cbar.set_label("Correlation Value")
 
-        axs.set_title("Correlation of Each Cell with Running Activity")
+        axs.set_title("Correlation of Each Neuron with Running Activity")
         axs.set_xticks([])
         axs.set_yticks([])
         plt.show()
@@ -843,6 +1006,21 @@ class Visualization:
     ################################################################################################
     
     def get_epochs_stimulus_shown(self, start: int, end: int) -> pd.DataFrame:
+        """
+        Get the stimulus epochs shown during the experiment.
+
+        Parameters
+        ----------
+        start: int
+            Start time index.
+        end: int
+            End time index.
+
+        Returns
+        -------
+        pd.DataFrame
+            The stimulus epochs shown during the experiment.
+        """
         if start < 0:
             start = 0
         if end > len(self.t)-1:
@@ -965,27 +1143,3 @@ class Visualization:
         spike_times[:, 0] = spike_indices
         spike_times[:, 1] = cell_spikes
         return spike_times
-
-
-# load data
-def load_data(path="../data"):
-    def array2df(d, key, cols):
-        d[key] = pd.DataFrame(d[key], columns=cols)
-
-    data = np.load(path + "/dff_data_dsi.npz", allow_pickle=True)
-    data = dict(data)
-    print("Data keys: ", data.keys())
-    array2df(
-        data,
-        "stim_table",
-        ["temporal_frequency", "orientation", "blank_sweep", "start", "end"],
-    )
-    array2df(data, "stim_epoch_table", ["stimulus", "start", "end"])
-
-    return data
-
-if __name__ == "__main__":
-    data = load_data()
-    vis = Visualization(data)
-    #print(vis.get_epochs_stimulus_shown(780, 95000))
-    vis.color_roi(np.array([1, 0, 1, 0, 1]), "Test", is_binary=True)

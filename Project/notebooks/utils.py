@@ -1,7 +1,7 @@
 import oopsi
 import pandas as pd
 import numpy as np
-from scipy.stats import ttest_ind, mannwhitneyu, pearsonr, stats, f_oneway
+from scipy.stats import ttest_ind, pearsonr, stats, f_oneway
 from scipy.optimize import curve_fit
 import statsmodels.stats.multitest as smm
 from scipy import signal, ndimage
@@ -9,144 +9,10 @@ import scipy.special as sp
 from tqdm import tqdm
 import pickle
 from oasis.functions import deconvolve
-from oasis.oasis_methods import oasisAR1, oasisAR2
 from joblib import Parallel, delayed
 import copy
 
 ### helper functions for accessing data
-
-def get_stimulus(t_idx: int, data: dict) -> np.array:
-    """
-    Provides the stimulus frame shown at time index.
-    Parameters
-    ----------
-    t_idx: int 
-        time index (of t from the data)
-    data: (dict)
-        dictionary containing at least 
-            "stim" (np.array): the shown stimulus frames with shape (n_frames, height, width)
-            "stim_table" (pandas dataframe): the table containing the start and end time of each stimulus frame
-
-    Returns
-    -------
-    stimulus: np.array, (height, width)
-        The stimulus frame shown at time index. 
-        Returns None if there is no stimulus at time t.
-    """
-
-    stim_table = data["stim_table"]  # pandas dataframe
-    stim = data["stim"]
-
-    # get the index of the stimulus at time t
-    idx = stim_table[(stim_table["start"] <= t_idx) & (stim_table["end"] > t_idx)]["frame"]
-
-    stimulus = stim[idx]
-
-    # if there is no stimulus at time t
-    if len(stimulus) == 0:
-        return None
-    return stimulus
-
-def get_spike_times(spikes: np.array, stim_table: pd.DataFrame, orientation: float = 0.0, frequency: float = 1.0, blank_sweep=False) -> np.array:
-    """
-    Get the spike times for a given orientation and frequency for all cells.
-
-    Parameters
-    ----------
-    spikes: np.array, (n_cells, n_samples)
-        The binary spike times for all cells.
-    stim_table: pd.DataFrame
-        The table containing the start and end time index of each stimulus epoch.
-    orientation: float
-        The orientation of the drifting grating stimulus in degrees.
-    frequency: float
-        The frequency of the drifting grating stimulus in Hz.
-    blank_sweep: bool
-        If True, return the spike times for the blank sweep periods.
-
-    Returns
-    -------
-    spike_times: np.array, (n_cells, n_samples)
-        The spike times for all cells for the given orientation and frequency as a binary array.
-    """
-    # get epochs the stimulus is shown
-    if not blank_sweep:
-        stimulus_epochs = stim_table[(stim_table["orientation"] == orientation) & (stim_table["temporal_frequency"] == frequency)]
-    else:
-        stimulus_epochs = stim_table[stim_table["blank_sweep"] == 1.0]
-
-    # get the spike times for the stimulus epochs
-    spike_times = np.zeros(spikes.shape)
-    for idx, epoch in stimulus_epochs.iterrows():
-        spike_times[:, int(epoch["start"]):int(epoch["end"])] = spikes[:, int(epoch["start"]):int(epoch["end"])]
-    return spike_times
-
-def get_spike_times_cell(
-    spikes: np.array,
-    cell: int,
-    stim_table: pd.DataFrame,
-    orientation: float = 0.0,
-    frequency: float = 1.0,
-    blank_sweep=False,
-) -> np.array:
-    """
-    Get the spike times for a given orientation and frequency for a specific cell.
-
-    Parameters
-    ----------
-    spikes: np.array, (n_cells, n_samples)
-        The spike counts for all cells.
-    cell: int
-        The index of the cell.
-    stim_table: pd.DataFrame
-        The table containing the start and end time index of each stimulus epoch.
-    orientation: float
-        The orientation of the drifting grating stimulus in degrees.
-    frequency: float
-        The frequency of the drifting grating stimulus in Hz.
-    blank_sweep: bool
-        If True, return the spike times for the blank sweep periods.
-
-    Returns
-    -------
-    spike_times: np.array, (n_spikes, 2)
-        spike_times[:, 0] contains the time index of the spikes
-        spike_times[:, 1] contains the intensity of the spikes
-    """
-    # get epochs the stimulus is shown
-    if not blank_sweep:
-        stimulus_epochs = stim_table[
-            (stim_table["orientation"] == orientation)
-            & (stim_table["temporal_frequency"] == frequency)
-        ]
-    else:
-        stimulus_epochs = stim_table[stim_table["blank_sweep"] == 1.0]
-
-    # create binary mask for the entire experiment time with 1s for the stimulus epochs
-    epochs_mask = np.zeros(spikes.shape[1], dtype=int)
-    for idx, epoch in stimulus_epochs.iterrows():
-        epochs_mask[int(epoch["start"]) : int(epoch["end"])] = 1
-
-    # match the epochs mask with the cells spike train by mutliplying them elementwise
-    cell_spikes = spikes[cell] * epochs_mask
-    
-    # store indices where cell_spikes is not zero using argwhere
-    spike_indices = np.argwhere(cell_spikes > 0).flatten().astype(int)
-    
-    # remove zero entries from cell_spikes
-    cell_spikes = cell_spikes[cell_spikes > 0]
-    
-    # check if cell_spikes has the same length as spike_indices
-    assert len(cell_spikes) == len(spike_indices)
-
-    # create the spike times array
-    spike_times = np.zeros((len(cell_spikes), 2))
-    spike_times[:, 0] = spike_indices
-    spike_times[:, 1] = cell_spikes
-    return spike_times
-
-
-
 def load_inferred_spikes(file_path: str) -> dict:
     """
     Load the inferred spikes from a file.
@@ -167,7 +33,6 @@ def load_inferred_spikes(file_path: str) -> dict:
         Dictionary containing the inferred spikes for each cell.
     """
     spikes = {}
-
     with open(file_path, "rb") as f:
         spikes = pickle.load(f)
 
@@ -175,7 +40,6 @@ def load_inferred_spikes(file_path: str) -> dict:
     spikes["spikes"] = np.array(spikes["spikes"])
     spikes["deconv"] = np.array(spikes["deconv"])
     spikes["binspikes"] = np.array(spikes["binspikes"])
-
     return spikes
 
 
@@ -196,10 +60,10 @@ def window_rms(a, window_size):
     y: np.ndarray, (n_samples, n_cells)
         The smoothed x.
     """
-    a2 = np.power(a, 2)  # signal quadrieren
+    a2 = np.power(a, 2)
     window = np.ones(window_size) / float(
         window_size
-    )  # Gewichte für die Convolution festlegen
+    )
     return np.sqrt(np.convolve(a2, window, "same"))
 
 def butter_filter_signal(
@@ -224,7 +88,6 @@ def butter_filter_signal(
     y: np.array, (n_samples, n_cells)
     The filtered x. The filter delay is compensated in the output y.
     """
-
     y = np.apply_along_axis(
         lambda col: signal.sosfiltfilt( # apply the filter to all columns
             signal.butter(              # apply the filter to a column
@@ -239,7 +102,6 @@ def butter_filter_signal(
         axis=1,
         arr=x,
     )
-
     return y
 
 def wiener_filter_signal(x: np.array, window: float) -> np.array:
@@ -258,7 +120,6 @@ def wiener_filter_signal(x: np.array, window: float) -> np.array:
     y: np.ndarray, (n_samples, n_cells)
         The filtered x. There is no filter delay as to my knowledge # TODO clarify!
     """
-
     y = np.apply_along_axis(
         lambda col: signal.wiener(  # apply the filter to a column
             col,
@@ -267,7 +128,6 @@ def wiener_filter_signal(x: np.array, window: float) -> np.array:
         axis=1,
         arr=x,
     )
-
     return y
 
 def oopsi_inference(dff: np.array, dt: float, thresh: int = 0.035, to_file: bool = False) -> dict:
@@ -282,6 +142,8 @@ def oopsi_inference(dff: np.array, dt: float, thresh: int = 0.035, to_file: bool
         Time step between samples.
     thresh: float
         Threshold for spike inference. Default 0.035.
+    to_file: bool
+        If True, save the inferred spikes to a file.
 
     Returns
     -------
@@ -293,7 +155,6 @@ def oopsi_inference(dff: np.array, dt: float, thresh: int = 0.035, to_file: bool
         }
         Dictionary containing the inferred spikes for each cell.
     """
-
     spikes = {
         "spikes": np.zeros(dff.shape),
         "deconv": np.zeros(dff.shape),
@@ -302,16 +163,13 @@ def oopsi_inference(dff: np.array, dt: float, thresh: int = 0.035, to_file: bool
     for idxCell in tqdm(range(dff.shape[0])):
         oopsi_inf = oopsi.fast(dff[idxCell], dt=dt)
         spike_train = [1 if value > thresh else 0 for value in oopsi_inf[0]]
-
         # store the results
         spikes["spikes"][idxCell, :] = oopsi_inf[0]
         spikes["deconv"][idxCell, :] = oopsi_inf[1]
         spikes["binspikes"][idxCell, :] = spike_train
-
     if to_file:
         with open("../data/inference_oopsi.pkl", "wb") as f:
             pickle.dump(spikes, f)
-
     return spikes
 
 def oasis_inference(dff: np.array, optimize_g: int = 3, penalty: int = 0, to_file: bool = False) -> dict:
@@ -352,14 +210,11 @@ def oasis_inference(dff: np.array, optimize_g: int = 3, penalty: int = 0, to_fil
         inferred_spikes["spikes"][idxCell, :] = spikes
         inferred_spikes["deconv"][idxCell, :] = deconv_signal
         inferred_spikes["binspikes"][idxCell, :] = binary_spikes
-    
     if to_file:
         with open("../data/inference_oasis.pkl", "wb") as f:
             pickle.dump(inferred_spikes, f)
-
     return inferred_spikes
 
-# TODO add the other inference methods
 
 ### functions for running speed processing
 def filter_running_speed(
@@ -386,93 +241,15 @@ def filter_running_speed(
     running_periods: np.array, (n_samples,)
         A binary array indicating the running periods.
     """
-
     # smooth the running speed signal
     running_speed_smooth = ndimage.uniform_filter1d(running_speed, s_kernel)
-
     # make binary array for running periods
     running_speed_binary = (running_speed_smooth > noise_thresh).astype(int)
-
     # fill gaps in running periods
     running_periods = ndimage.morphology.binary_closing(running_speed_binary, structure=np.ones(c_kernel))
-
     # remove peaks in running speed data
     running_periods = ndimage.morphology.binary_opening(running_periods, structure=np.ones(o_kernel))
-
     return running_periods
-
-def get_running_periods_table(running_periods: np.array) -> pd.DataFrame:
-    """
-    Get the running periods table from the binary array of running periods.
-    
-    Parameters
-    ----------
-    running_periods: np.array, (n_samples,)
-        A binary array indicating the running periods.
-
-    Returns
-    -------
-    running_periods_table: pd.DataFrame
-        A table containing the start and end time index of each running period.
-        Note: The end index points on the last 1 of the running period.
-        Note: The stimulus column is set to "running" and has no meaning. 
-            It is added for compatibility with epochs_in_range().
-    """
-    
-    # extract all start and end indices of running periods
-    diff = np.diff(running_periods.astype(int))
-    start_indices = np.where(diff == 1)[0] + 1
-    stop_indices = np.where(diff == -1)[0]
-
-    # Handle edge cases
-    if running_periods[0] == 1:
-        start_indices = np.insert(start_indices, 0, 0)
-    if running_periods[-1] == 1:
-        stop_indices = np.append(stop_indices, len(running_periods) - 1)
-
-    # write to table with columns "start" and "end"
-    running_periods_table = pd.DataFrame({"stimulus": ["running"] * len(start_indices), "start": start_indices, "end": stop_indices})
-    return running_periods_table
-
-# TODO die funktion ist glaub überflüssig
-# def analyze_spike_running_correlation(spiketrains, running_period):
-#     n_cells, n_measurements = spiketrains.shape
-
-#     # Ensure running_period is boolean
-#     running_period = running_period.astype(bool)
-
-#     # Initialize lists to store results
-#     p_values = []
-
-#     # Iterate over each cell to perform the statistical test
-#     for cell in range(n_cells):
-#         # Get spikes for running and non-running periods
-#         spikes_running = spiketrains[cell, running_period]
-#         spikes_non_running = spiketrains[cell, ~running_period]
-
-#         # Calculate the average spike rate during running and non-running periods
-#         rate_running = np.mean(spikes_running)
-#         rate_non_running = np.mean(spikes_non_running)
-
-#         # Perform unpaired statistical test
-#         if np.var(spikes_running) == 0 or np.var(spikes_non_running) == 0:
-#             # If there's no variation, set p-value to 1.0
-#             p_value = 1.0
-#         else:
-#             # Use independent t-testa
-#             t_stat, p_value = ttest_ind(
-#                 spikes_running, spikes_non_running, equal_var=False
-#             )
-
-#         p_values.append(p_value)
-
-#     # Apply multiple comparisons correction (Bonferroni)
-#     corrected_p_values = smm.multipletests(p_values, method="bonferroni")[1]
-
-#     # Identify significant cells
-#     significant_cells = np.where(corrected_p_values < 0.05)[0]
-
-#     return significant_cells, corrected_p_values
 
 def get_running_correlation_max(roi_masks: np.array, inferred_spikes: np.array, running_speed: np.array):
     """
@@ -491,17 +268,14 @@ def get_running_correlation_max(roi_masks: np.array, inferred_spikes: np.array, 
 
     Returns
     -------
-    roi_masks_corr_sum: np.array
-        The sum of the roi masks with the correlation values applied.
+    mask: np.array
+        The mask with the correlation values applied.
     cell_corr: np.array
         The correlation values for each cell.
     top_10: np.array
-        The top 10 absolute correlation values.
+        The indices of the top 10 absolute correlation values.
     """
     roi_masks_copy = roi_masks.copy()
-    # roi_masks_copy = np.where(roi_masks_copy == 0, -2, roi_masks_copy)
-
-    #roi_masks_corr = np.zeros_like(roi_masks_copy, dtype=np.float64)
     cell_corr = np.zeros(roi_masks_copy.shape[0])
     mask = np.zeros(roi_masks_copy[0].shape, dtype=np.float64)
     for cell in range(roi_masks_copy.shape[0]):
@@ -514,154 +288,24 @@ def get_running_correlation_max(roi_masks: np.array, inferred_spikes: np.array, 
     top_10 = np.argsort(-np.abs(cell_corr))[:10]
     return mask, cell_corr, top_10
 
-### Visualization Helper
-def get_epochs_in_range(stim_epoch_table: pd.DataFrame, start: int = 0, end: int = 105967) -> pd.DataFrame:
-    """
-    Get the epochs which don't show the drifting_gratings stimulus in a given range.
-    
-    Parameters
-    ----------
-    stim_epoch_table: pd.DataFrame
-        A table containing the start and end time index of each stimulus epoch.
-    start: int
-        The start of the range of interest. Default 0.
-    end: int
-        The end of the range of interest. Default 105967 (The last index of t).
-
-    Returns
-    -------
-    epochs_in_range: pd.DataFrame
-        A table containing the epochs that are within the range [start, end].
-        Note: Epochs that are partially in the range are included and cut to start or end.
-    """
-    # extract all epochs that don't show the locally sparse noise stimulus
-    # mark the epochs where the locally sparse noise stimulus is not shown
-    other_stimuli_epochs = stim_epoch_table[
-        stim_epoch_table["stimulus"] != "drifting_gratings"
-    ].copy()
-
-    # if start is smaller than the first epoch start, add interval from start to epoch start
-    if start < stim_epoch_table["start"].min():
-        other_stimuli_epochs = pd.concat([other_stimuli_epochs, pd.DataFrame([
-            {"stimulus": "no_measurement", 
-            "start": start, 
-            "end": stim_epoch_table.iloc[0]["start"] - 1}])],
-            ignore_index=True,
-        )
-
-    # if end is larger than the last epoch end, add interval from last epoch end to end
-    if end > stim_epoch_table["end"].max():
-        other_stimuli_epochs = pd.concat([other_stimuli_epochs, pd.DataFrame([
-            {"stimulus": "no_measurement", 
-            "start": stim_epoch_table.iloc[-1]["end"] + 1, 
-            "end": end}])],
-            ignore_index=True,
-        )
-
-    # find epochs that overlap "start" and set their start to "start"
-    other_stimuli_epochs.loc[
-        (other_stimuli_epochs["start"] < start) & (other_stimuli_epochs["end"] >= start), "start"
-    ] = start
-
-    # find epochs that overlap "end" and set their end to "end"
-    other_stimuli_epochs.loc[
-        (other_stimuli_epochs["start"] <= end) & (other_stimuli_epochs["end"] > end), "end"
-    ] = end
-
-    # filter epochs that are within the range [start, end]
-    other_stimuli_epochs = other_stimuli_epochs[
-        (other_stimuli_epochs["start"] >= start) & (other_stimuli_epochs["end"] <= end)
-    ]
-
-    return other_stimuli_epochs
-
-### ML Estimation of RF
-
-def negloglike_lnp(
-    w: np.array, c: np.array, s: np.array, dt: float = 0.1, R: float = 50
-) -> float:
-    """Implements the negative (!) log-likelihood of the LNP model
-
-    Parameters
-    ----------
-
-    w: np.array, (Dx * Dy, )
-      current receptive field
-
-    c: np.array, (nT, )
-      spike counts
-
-    s: np.array, (Dx * Dy, nT)
-      stimulus matrix
-
-
-    Returns
-    -------
-
-    f: float
-      function value of the negative log likelihood at w
-
-    """
-
-    # compute dot product of w and s
-    ws = np.dot(w, s)
-    # compute the mean rate in time bins
-    r = np.exp(ws) * dt * R
-
-    # compute the negative log likelihood
-    f = -np.sum(c * np.log(r) - np.log(sp.factorial(c)) - r)
-
-    return f
-
-
-def deriv_negloglike_lnp(
-    w: np.array, c: np.array, s: np.array, dt: float = 0.1, R: float = 50
-) -> np.array:
-    """Implements the gradient of the negative log-likelihood of the LNP model
-
-    Parameters
-    ----------
-
-    see negloglike_lnp
-
-    Returns
-    -------
-
-    df: np.array, (Dx * Dy, )
-      gradient of the negative log likelihood with respect to w
-
-    """
-    # compute dot product of w and s
-    ws = np.dot(w, s)
-    # compute the mean rate in time bins
-    r = np.exp(ws) * dt * R
-    # compute the gradient
-    df = np.dot(s, (r - c))  # switched r and c to match negative log likelihood
-
-    return df
-
 def vonMises(theta: np.ndarray, alpha: float, kappa: float, mu: float, phi: float) -> np.ndarray:
-    """Evaluate the parametric von Mises tuning curve with parameters p at locations theta.
+    """
+    Evaluate the parametric von Mises tuning curve with parameters p at locations theta.
 
     Parameters
     ----------
-
     theta: np.array, shape=(N, )
         Locations. The input unit is degree.
-
     alpha, kappa, mu, phi : float
         Function parameters
-
     Return
     ------
     f: np.array, shape=(N, )
         Tuning curve.
     """
-
     # Convert theta to radians
     theta_rad = np.deg2rad(theta)
     phi_rad = np.deg2rad(phi)
-
     f = np.exp(
         alpha
         + kappa * (np.cos(2 * (theta_rad - phi_rad)) - 1)
@@ -669,30 +313,21 @@ def vonMises(theta: np.ndarray, alpha: float, kappa: float, mu: float, phi: floa
     )
     return f
 
-def fitTemporalTuningCurve(
-    inferred_spikes: np.ndarray,
-    stim_table=pd.DataFrame(),
-) -> dict:
-    """Fit a von Mises tuning curve to the spike counts in count with direction dir using a least-squares fit.
+def fitTemporalTuningCurve(inferred_spikes: np.ndarray, stim_table=pd.DataFrame()) -> dict:
+    """
+    Fit a von Mises tuning curve to the spike counts in count with direction dir using a least-squares fit.
+    
     Parameters
     ----------
     inferred_spikes: np.array, shape=(n_neurons, n_timepoints)
-
+        The inferred spike counts for each neuron.
     stim_table: pd.DataFrame
         DataFrame containing the stimulus information
 
-    neuron: int, default=0
-
     Return
     ------
-    fitted_curves: np.array, shape=(n_temporal_frequencies, n_directions)
-        Fitted tuning curves for each temporal frequency
-
-    mean_spike_counts: np.array, shape=(n_directions,)
-        Mean spike counts per direction
-
-    std_spike_counts: np.array, shape=(n_directions,)
-        Standard deviation of spike counts per direction
+    result: dict
+        Dictionary containing the fitted curves, mean spike counts and std spike counts for each neuron.
     """
     result = {}
 
@@ -730,7 +365,6 @@ def fitTemporalTuningCurve(
         std_spike_counts = np.array(
             [np.std(spike_counts[dirs == d]) for d in unique_directions]
         )
-
         bounds = (
                 [-np.inf, -np.inf, -np.inf, -np.inf],
                 [np.inf, np.inf, np.inf, 360],
@@ -750,7 +384,6 @@ def fitTemporalTuningCurve(
         results = Parallel(n_jobs=32)(
             delayed(process_frequency)(freq) for freq in unique_temporal_frequencies
         )
-
         # Process results from parallel execution
         for temporal_frequency, popt, fitted_curve in results:
             i = np.where(unique_temporal_frequencies == temporal_frequency)[0][0]
@@ -764,10 +397,22 @@ def fitTemporalTuningCurve(
         }
     return result
 
-def getMaxOfTemporalTuningCurves(
-    tuning_curve_fit: dict,
-    stim_table,
-):
+def getMaxOfTemporalTuningCurves(tuning_curve_fit: dict, stim_table) -> dict:
+    """
+    Get the maximum direction for each neuron from the tuning curve fit.
+
+    Parameters
+    ----------
+    tuning_curve_fit: dict
+        Dictionary containing the fitted curves, mean spike counts and std spike counts for each neuron.
+    stim_table: pd.DataFrame
+        DataFrame containing the stimulus information
+
+    Returns
+    -------
+    results: dict
+        Dictionary containing the maximum direction, second maximum direction and whether the neuron is orientation selective or not.
+    """
     stim_table = stim_table.copy()
     unique_dirs = np.unique(stim_table["orientation"].dropna())
     unique_dirs.sort()
@@ -783,13 +428,11 @@ def getMaxOfTemporalTuningCurves(
         fitted_curves[
             max_curve_idx_for_all_directions[max_direction_idx], max_direction_idx
         ] = 0
-
         max_direction_idx2 = np.argmax(
             fitted_curves[
                 max_curve_idx_for_all_directions[max_direction_idx]
             ]
         )
-
         is_orientational = (
             1
             if (unique_dirs[max_direction_idx] + 180) % 360
@@ -801,7 +444,6 @@ def getMaxOfTemporalTuningCurves(
             "max_direction2": unique_dirs[max_direction_idx2],
             "is_orientationnal": is_orientational,
         }
-        
     return results
 
 def testTuningFunction_opt(
@@ -812,6 +454,31 @@ def testTuningFunction_opt(
     random_seed: int = 2046,
     to_file: bool = True,
 ) -> [dict, np.ndarray]:
+    """
+    Test the tuning function of the neurons using a permutation test.
+
+    Parameters
+    ----------
+    inferred_spikes: np.ndarray
+        The inferred spikes for each neuron.
+    stim_table: pd.DataFrame
+        DataFrame containing the stimulus information
+    psi: int
+        The tuning function to test. 1 for direction, 2 for orientation.
+    niters: int
+        The number of iterations to run the permutation test.
+    random_seed: int
+        The random seed for reproducibility.
+    to_file: bool
+        If True, save the results to a file.
+
+    Returns
+    -------
+    result: dict
+        Dictionary containing the p-value and q-value for each neuron.
+    qdistr: np.ndarray
+        The distribution of q-values for each neuron.
+    """
     starts = stim_table["start"].astype(int).to_numpy()
     ends = stim_table["end"].astype(int).to_numpy()
 
@@ -829,7 +496,6 @@ def testTuningFunction_opt(
     for neuron in tqdm(range(inferred_spikes["binspikes"].shape[0])):
         result[neuron] = {}
         # Vectorized calculation of spike counts
-        # TODO ist das nicht die bin_spike_counts Funktion?
         spike_counts = np.array(
             [
                 np.sum(inferred_spikes["binspikes"][neuron, start:end])
@@ -838,9 +504,7 @@ def testTuningFunction_opt(
         )
         spike_counts = spike_counts[stim_table["orientation"].dropna().index]
 
-        for tf, temporal_frequency in enumerate(
-            np.concatenate((unique_temporal_frequencies, [-1]))
-        ):
+        for tf, temporal_frequency in enumerate(np.concatenate((unique_temporal_frequencies, [-1]))):
             m_k = np.array(
                 [
                     np.mean(
@@ -857,7 +521,6 @@ def testTuningFunction_opt(
             q = np.abs(np.dot(m_k, v_k))
 
             rng = np.random.default_rng(random_seed)
-
             def process_iteration(i, random_seed):  # Pass random_seed to each iteration
                 rng = np.random.default_rng(random_seed + i)  # Create separate RNG
                 shuffled_counts = rng.permutation(spike_counts)
@@ -884,19 +547,21 @@ def testTuningFunction_opt(
             pickle.dump(qdistr, f)
     return result, qdistr
 
-def getTemporalTunings(
-    inferred_spikes: np.ndarray,
-    stim_table=pd.DataFrame(),):
+def getTemporalTunings(inferred_spikes: np.ndarray, stim_table=pd.DataFrame()) -> np.ndarray:
     """
     Calculates mean and standard deviation of spike counts for each neuron and temporal frequency.
 
-    Args:
-        stim_table (DataFrame): Table containing stimulus information, including 'temporal_frequency'.
-        inferred_spikes (DataFrame): Spike data with a 'binspikes' column for each neuron.
+    Parameters
+    ----------
+    inferred_spikes: np.ndarray
+        The inferred spikes for each neuron.
+    stim_table: pd.DataFrame
+        DataFrame containing the stimulus information
 
-    Returns:
-        np.ndarray: Array with shape (2, neurons, unique_temporal_frequencies),
-                    where the first dimension represents mean (0) and std dev (1).
+    Returns
+    -------
+    temporal_tunings: np.ndarray
+        The mean and standard deviation of spike counts for each neuron and temporal frequency.
     """
     unique_dirs = np.unique(stim_table["temporal_frequency"].dropna())
     neurons = inferred_spikes["binspikes"].shape[0]
@@ -907,7 +572,6 @@ def getTemporalTunings(
         spike_count = bin_spike_counts(
             stim_table, inferred_spikes, neuron=neuron
         )[stim_table["temporal_frequency"].notna()]
-
         temporal_tunings[:, neuron, :] = np.array(
             [
                 (
@@ -917,10 +581,24 @@ def getTemporalTunings(
                 for d in unique_dirs
             ]
         ).T  # Transpose to match desired shape
-
     return temporal_tunings
 
-def load_tuning_test_results(orientation: bool = True):
+def load_tuning_test_results(orientation: bool = True) -> [dict, np.ndarray]:
+    """
+    Load the tuning test results from a file.
+
+    Parameters
+    ----------
+    orientation: bool
+        If True, load orientation tuning test results. Otherwise, load direction tuning test results.
+
+    Returns
+    -------
+    result: dict
+        Dictionary containing the p-value and q-value for each neuron.
+    qdistr: np.ndarray
+        The distribution of q-values for each neuron.
+    """
     file_string = "or" if orientation else "dir"
     with open(f"../data/qp_tuning_test_{file_string}.pkl", "rb") as f:
         result = pickle.load(f)
@@ -929,13 +607,29 @@ def load_tuning_test_results(orientation: bool = True):
     return result, np.array(qdistr)
 
 # asses temporal frequency:
-def bin_spike_counts(stim_table, spikes, neuron):
+def bin_spike_counts(stim_table: pd.DataFrame, spikes: dict, neuron: int) -> np.array:
+    """
+    Calculate the spike counts for a given neuron and stimulus table.
+
+    Parameters
+    ----------
+    stim_table: pd.DataFrame
+        DataFrame containing the stimulus information
+    spikes: dict
+        Dictionary containing the inferred spikes for each neuron.
+    neuron: int
+        The neuron index.
+
+    Returns
+    -------
+    spike_count: np.array
+        The spike counts for the given neuron.
+    """
     spike_count = np.zeros(len(stim_table["start"]))
     for i in range(len(stim_table)):
         start = stim_table["start"][i].astype(int)
         end = stim_table["end"][i].astype(int)
         spike_count[i] = np.sum(spikes["binspikes"][neuron, start:end])
-
     return spike_count
 
 def process_tuning_results(
@@ -950,21 +644,31 @@ def process_tuning_results(
     Processes the results of temporal frequency tuning tests, creating a DataFrame
     with relevant statistics for further analysis.
 
-    Args:
-        testTuningFunctionResultsDir: Dictionary containing test results per neuron.
-        p_thresh: Significance threshold for p-values.
-        keys: List of temporal frequencies used in the tests.
+    Parameters
+    ----------
+    testTuningFunctionResultsDir: dict
+        Dictionary containing test results per neuron.
+    stim_table: pd.DataFrame
+        DataFrame containing the stimulus information
+    inferred_spikes: dict
+        Dictionary containing the inferred spikes for each neuron.
+    max_of_temporal_tuning_curve: dict
+        Dictionary with maximum values for the tuning curve.
+    keys: list
+        List of keys representing temporal frequencies.
+    p_thresh: float
+        P-value threshold for determining significance (default: 0.0001).
 
-    Returns:
-        DataFrame containing processed results.
+    Returns
+    -------
+    df_dir: pd.DataFrame
+        DataFrame with processed results.
     """
     spike_count = np.array(
     [
         bin_spike_counts(stim_table, inferred_spikes, neuron=neuron)
         for neuron in range(inferred_spikes["binspikes"].shape[0])
-    ]
-    )
-    
+    ])
     rows = []
 
     for neuron, temporal_resolutions in testTuningFunctionResultsDir.items():
@@ -1002,7 +706,6 @@ def process_tuning_results(
 
     # Concatenate the new DataFrame with the existing one
     df_dir = pd.concat([df_dir, max_df], axis=1)
-
     return df_dir
 
 def process_tuning_data(
@@ -1010,28 +713,30 @@ def process_tuning_data(
     max_of_temporal_tuning_curve: dict,
     df_dir: pd.DataFrame,
     keys_str: list,
-    p_thresh: float = 0.0001,  # Added default p-value threshold
-):
+    p_thresh: float = 0.0001,  # default p-value threshold
+) -> pd.DataFrame:
     """
     Processes temporal frequency tuning data, constructs DataFrames,
     and calculates summary statistics for complex and non-complex neurons.
 
-    Args:
-        testTuningFunctionResultsOr: Dictionary containing test results per neuron.
-        max_of_temporal_tuning_curve: Dictionary with maximum values for the tuning curve.
-        keys_str: List of string keys representing temporal frequencies.
-        p_thresh: (Optional) P-value threshold for determining significance (default: 0.0001).
+    Parameters
+    ----------
+    testTuningFunctionResultsOr: dict
+        Dictionary containing test results per neuron.
+    max_of_temporal_tuning_curve: dict
+        Dictionary with maximum values for the tuning curve.
+    df_dir: pd.DataFrame
+        DataFrame with processed results.
+    keys_str: list
+        List of keys representing temporal frequencies.
+    p_thresh: float
+        P-value threshold for determining significance (default: 0.0001).
 
-    Returns:
-        df_or: DataFrame with processed results.
-        df_complex: DataFrame for complex neurons (excluding 'complex' column).
-        df_non_complex: DataFrame for non-complex neurons (excluding 'complex' column).
-        comp_or: Sum of values across `keys_str` columns for complex neurons in `df_or`.
-        noncomp_or: Sum of values across `keys_str` columns for non-complex neurons in `df_or`.
-        comp_dir: Sum of values across `keys_str` columns for complex neurons in `df_dir`.
-        noncomp_dir: Sum of values across `keys_str` columns for non-complex neurons in `df_dir`.
+    Returns
+    -------
+    df_or: pd.DataFrame
+        DataFrame with processed results.
     """
-
     # Create rows for DataFrame (with dictionary comprehension)
     rows = [
         {
@@ -1073,14 +778,33 @@ def process_tuning_data(
     df_non_complex = df_dir[~df_dir["complex"]].drop("complex", axis=1)
     comp_dir = df_complex[keys_str].sum()
     noncomp_dir = df_non_complex[keys_str].sum()
-
     return df_or, df_complex, df_non_complex, comp_or, noncomp_or, comp_dir, noncomp_dir
 
-def kolmogorovTest(df:pd.DataFrame(),
-                   df2:pd.DataFrame() = None,
-                   columns: list = ["p_val_1", "p_val_2", "p_val_4", "p_val_8", "p_val_15", "p_val_-1"],
-                   base_column: str = "p_val_-1") -> pd.DataFrame():
-    # Perform the Kolmogorov-Smirnov test for each pair of distributions
+def kolmogorovTest(
+    df:pd.DataFrame(),
+    df2:pd.DataFrame() = None,
+    columns: list = ["p_val_1", "p_val_2", "p_val_4", "p_val_8", "p_val_15", "p_val_-1"],
+    base_column: str = "p_val_-1"
+) -> pd.DataFrame():
+    """
+    Perform the Kolmogorov-Smirnov test for each pair of distributions.
+
+    Parameters
+    ----------
+    df: pd.DataFrame
+        DataFrame containing the p-values for each neuron.
+    df2: pd.DataFrame
+        DataFrame containing the p-values for each neuron for a second condition.
+    columns: list
+        List of columns to compare.
+    base_column: str
+        The base column to compare against.
+
+    Returns
+    -------
+    results_df: pd.DataFrame
+        DataFrame containing the results of the Kolmogorov-Smirnov test.
+    """
     if df2 is not None:
         ks_statistic, p_value = stats.ks_2samp(df[base_column], df2[base_column])
         print(f"KS Statistic: {ks_statistic}")
@@ -1106,10 +830,33 @@ def kolmogorovTest(df:pd.DataFrame(),
     print("----------------------------------------------------")
     print(results_df)
     print("----------------------------------------------------")
-
     return results_df
     
-def process_permutation(i, stim_table, inferred_spikes, neuron):
+def process_permutation(
+    i: int, 
+    stim_table: pd.DataFrame, 
+    inferred_spikes: dict, 
+    neuron: int
+) -> float:
+    """
+    Process a single permutation for the permutation test.
+
+    Parameters
+    ----------
+    i: int
+        The permutation index.
+    stim_table: pd.DataFrame
+        DataFrame containing the stimulus information.
+    inferred_spikes: dict
+        Dictionary containing the inferred spikes for each neuron.
+    neuron: int
+        The neuron index.
+
+    Returns
+    -------
+    float
+        The test statistic for the permutation.
+    """
     permuted_frequencies = np.random.permutation(
         stim_table["temporal_frequency"].dropna()
     )
@@ -1118,10 +865,35 @@ def process_permutation(i, stim_table, inferred_spikes, neuron):
     )
     return get_test(spike_count_by_freq)
 
-def get_p_values_permutation_test_helper(inferred_spikes, stim_table, n_permutations, n_jobs=-1):
+def get_p_values_permutation_test_helper(
+    inferred_spikes: dict, 
+    stim_table: pd.DataFrame, 
+    n_permutations: int, 
+    n_jobs: int = -1
+) -> [dict, dict]:
+    """
+    Helper function to get the p-values for the permutation test.
+
+    Parameters
+    ----------
+    inferred_spikes: dict
+        Dictionary containing the inferred spikes for each neuron.
+    stim_table: pd.DataFrame
+        DataFrame containing the stimulus information.
+    n_permutations: int
+        The number of permutations to run.
+    n_jobs: int
+        The number of jobs to run in parallel.
+        
+    Returns
+    -------
+    neuron_stats: dict
+        Dictionary containing the test statistic for each neuron.
+    permuted_stats: dict
+        Dictionary containing the test statistic for each permutation.
+    """
     neuron_stats = {}
     permuted_stats = {}
-
     for neuron in tqdm(range(inferred_spikes["binspikes"].shape[0])):
         spike_count_by_freq = get_spike_count_by_freq(
             stim_table,
@@ -1136,33 +908,32 @@ def get_p_values_permutation_test_helper(inferred_spikes, stim_table, n_permutat
             for i in range(n_permutations)
         )
         permuted_stats[neuron] = np.array(results)  # Store as numpy array
-
     return neuron_stats, permuted_stats
 
-# def get_p_values_permutation_test_helper(inferred_spikes, stim_table, n_permutations, n_jobs=-1):
-#     neuron_stats = {}
-#     permuted_stats = {}
-
-#     for neuron in range(inferred_spikes["binspikes"].shape[0]):
-#         spike_count_by_freq = get_spike_count_by_freq(
-#             stim_table,
-#             stim_table["temporal_frequency"].dropna().values,
-#             inferred_spikes,
-#             neuron,
-#         )
-#         neuron_stats[neuron] = get_test(spike_count_by_freq)
-
-#         results = Parallel(n_jobs=n_jobs)(
-#             delayed(process_permutation)(i, stim_table.copy().dropna(), inferred_spikes, neuron)
-#             for i in range(n_permutations)
-#         )
-#         permuted_stats[neuron] = np.array(results)  # Store as numpy array
-
-#     return neuron_stats, permuted_stats
-
-def get_spike_count_by_freq(stim_table, frequencies, inferred_spikes, neuron=0):
+def get_spike_count_by_freq(
+    stim_table: pd.DataFrame, 
+    frequencies: np.array, 
+    inferred_spikes: dict, 
+    neuron: int = 0
+) -> np.array:
     """
-    this needs a comment
+    Get the spike count by frequency for a given neuron.
+
+    Parameters
+    ----------
+    stim_table: pd.DataFrame
+        DataFrame containing the stimulus information.
+    frequencies: np.array
+        The temporal frequencies.
+    inferred_spikes: dict
+        Dictionary containing the inferred spikes for each neuron.
+    neuron: int
+        The neuron index.
+
+    Returns
+    -------
+    spike_count_by_freq: np.array
+        The spike count by frequency for the given neuron.
     """
     spike_count = bin_spike_counts(stim_table, inferred_spikes, neuron=neuron)
     spike_count = spike_count[
@@ -1183,10 +954,20 @@ def get_spike_count_by_freq(stim_table, frequencies, inferred_spikes, neuron=0):
             )
     return spike_count_by_freq
 
+def get_test(spike_count_by_freq: np.array) -> float:
+    """
+    Get the test statistic for the permutation test.
 
-def get_test(spike_count_by_freq):
+    Parameters
+    ----------
+    spike_count_by_freq: np.array
+        The spike count by frequency for a neuron.
+
+    Returns
+    -------
+    float
+        The test statistic for the permutation.
+    """
     # test statistic for our permutation test is a one way anove (variation explained by temporal frequency)
     # variance explained by frequency (test the frequency distributions of each neuron against eachother)
-    return f_oneway(
-        *[spike_count_by_freq[i, :] for i in range(spike_count_by_freq.shape[0])]
-    ).statistic
+    return f_oneway(*[spike_count_by_freq[i, :] for i in range(spike_count_by_freq.shape[0])]).statistic
