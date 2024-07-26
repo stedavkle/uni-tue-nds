@@ -731,12 +731,11 @@ def fitTemporalTuningCurve(
             [np.std(spike_counts[dirs == d]) for d in unique_directions]
         )
 
-        for i, temporal_frequency in enumerate(unique_temporal_frequencies):
-            # Perform the non-linear least squares fit
-            bounds = (
+        bounds = (
                 [-np.inf, -np.inf, -np.inf, -np.inf],
                 [np.inf, np.inf, np.inf, 360],
             )
+        def process_frequency(temporal_frequency):
             popt, _ = curve_fit(
                 vonMises,
                 dirs[temporal_frequencies == temporal_frequency],
@@ -745,9 +744,18 @@ def fitTemporalTuningCurve(
                 bounds=bounds,
                 maxfev=5000,
             )
-            curves_temporal_frequencies[i, :] = popt
+            fitted_curve = vonMises(unique_directions, *popt)
+            return temporal_frequency, popt, fitted_curve
 
-            fitted_curves[i, :] = vonMises(unique_directions, *popt)
+        results = Parallel(n_jobs=32)(
+            delayed(process_frequency)(freq) for freq in unique_temporal_frequencies
+        )
+
+        # Process results from parallel execution
+        for temporal_frequency, popt, fitted_curve in results:
+            i = np.where(unique_temporal_frequencies == temporal_frequency)[0][0]
+            curves_temporal_frequencies[i, :] = popt
+            fitted_curves[i, :] = fitted_curve
 
         result[neuron] = {
             "fitted_curves": fitted_curves,
@@ -850,27 +858,20 @@ def testTuningFunction_opt(
 
             rng = np.random.default_rng(random_seed)
 
-#             # Parallelize the inner loop
-#             def process_iteration(i):
-#                 shuffled_counts = rng.permutation(spike_counts)
-#                 shuffled_m_k = np.array(
-#                     [np.mean(shuffled_counts[dirs == d]) for d in unique_directions]
-#                 )
-#                 return np.abs(np.dot(shuffled_m_k, v_k))
-
-#             qdistr_values = Parallel(n_jobs=-1)(
-#                 delayed(process_iteration)(i) for i in range(niters)
-#             )
-#             qdistr[neuron, tf, :] = np.array(qdistr_values)
-
-            for i in range(niters):
+            def process_iteration(i, random_seed):  # Pass random_seed to each iteration
+                rng = np.random.default_rng(random_seed + i)  # Create separate RNG
                 shuffled_counts = rng.permutation(spike_counts)
                 shuffled_m_k = np.array(
                     [np.mean(shuffled_counts[dirs == d]) for d in unique_directions]
                 )
-                qdistr[neuron, tf, i] = np.abs(np.dot(shuffled_m_k, v_k))
+                return np.abs(np.dot(shuffled_m_k, v_k))
 
-            p = np.sum(qdistr[neuron, tf, :] >= q) / niters
+            qdistr_values = Parallel(n_jobs=-1, prefer="processes", batch_size=5)(
+                delayed(process_iteration)(i, random_seed) for i in range(niters)
+            )
+            qdistr[neuron, tf, :] = np.array(qdistr_values)
+
+            p = np.sum(qdistr_values >= q) / len(qdistr_values)
             result[neuron][temporal_frequency] = {
                 "p": p,
                 "q": q,
@@ -1121,7 +1122,7 @@ def get_p_values_permutation_test_helper(inferred_spikes, stim_table, n_permutat
     neuron_stats = {}
     permuted_stats = {}
 
-    for neuron in range(inferred_spikes["binspikes"].shape[0]):
+    for neuron in tqdm(range(inferred_spikes["binspikes"].shape[0])):
         spike_count_by_freq = get_spike_count_by_freq(
             stim_table,
             stim_table["temporal_frequency"].dropna().values,
@@ -1130,7 +1131,7 @@ def get_p_values_permutation_test_helper(inferred_spikes, stim_table, n_permutat
         )
         neuron_stats[neuron] = get_test(spike_count_by_freq)
 
-        results = Parallel(n_jobs=n_jobs)(
+        results = Parallel(n_jobs=n_jobs, prefer="processes", batch_size=5)(
             delayed(process_permutation)(i, stim_table, inferred_spikes, neuron)
             for i in range(n_permutations)
         )
