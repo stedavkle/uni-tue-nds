@@ -104,7 +104,7 @@ class Visualization:
             min=0,  # Minimum value
             max=self.dff.shape[0] - 1,  # Maximum value based on number of cells
             step=1,  # Step size
-            description="Neuron Index:",  # Slider label
+            description="Neuron:",  # Slider label
             continuous_update=update,  # Update plot only on releasing the slider
             layout=Layout(width="99%"),  # Adjust the layout width
         )
@@ -153,7 +153,7 @@ class Visualization:
         return Dropdown(
             options=frequencies,
             value=value,
-            description="Temporal Frequency:",
+            description="Temp. Freq.:",
             disabled=False,
             layout=Layout(width="99%"),
         )
@@ -165,7 +165,8 @@ class Visualization:
         self, 
         cellIdx: int, 
         sample_range: list[float, float], 
-        show_epochs: bool=False
+        show_epochs: bool=False,
+        save: bool=False
     ) -> None:
         """
         Plots the activity traces of a cell and the running speed of the mouse.
@@ -178,10 +179,12 @@ class Visualization:
             Range of samples to plot [a, b] in seconds
         show_epochs : bool, optional
             Whether to show the epochs where the stimulus was shown, by default False
+        save : bool, optional
+            Save the plot as a .png file, by default False
         """
         start = max(int(sample_range[0] * self.fs), 0)
         end = min(int(sample_range[1] * self.fs), len(self.t) - 1)
-        fig, axs = plt.subplots(2, 1, figsize=(10, 4), height_ratios=[2, 1])
+        fig, axs = plt.subplots(2, 1, figsize=(15, 4), height_ratios=[2, 1])
         axs[0].plot(self.t[start:end], self.dff[cellIdx, start:end], color="blue")
         axs[0].set_title(f"Raw Activity Trace of Neuron {cellIdx}")
         axs[0].set_ylabel("Activity")
@@ -207,6 +210,8 @@ class Visualization:
                 axs[1].axvspan(self.t[row["start"]], self.t[row["end"]], color="gray", alpha=0.2)
             axs[0].legend(loc="upper left")
         plt.tight_layout()
+        if save:
+            plt.savefig(f"../img/raw_activity_traces_cell_{cellIdx}.png", dpi=300)
         plt.show()
 
     def update_filter_traces_plot(
@@ -215,7 +220,8 @@ class Visualization:
         sample_range: list[float, float], 
         dff_butter: np.array, 
         dff_wiener: np.array, 
-        dff_both: np.array
+        dff_both: np.array,
+        save: bool=False
     ) -> None:
         """
         Update the plot with the filtering stages of the cell activity traces.
@@ -233,10 +239,12 @@ class Visualization:
             Wiener filtered activity traces
         dff_both : np.array
             Butterworth and Wiener filtered activity traces
+        save : bool, optional
+            Save the plot as a .png file, by default False
         """
         start = max(int(sample_range[0] * self.fs), 0)
         end = min(int(sample_range[1] * self.fs), len(self.t) - 1)
-        fig, axs = plt.subplots(4, 1, figsize=(10, 10), tight_layout=True)
+        fig, axs = plt.subplots(4, 1, figsize=(15, 10))
         axs[0].plot(self.t[start:end], self.dff[cellIdx, start:end], "b")
         axs[0].set_title("Raw Activity Traces")
         #axs[0].set_ylabel("Activity")
@@ -268,8 +276,11 @@ class Visualization:
             [np.min(dff_both[cellIdx, :]) - 0.5, np.max(dff_both[cellIdx, :]) + 0.5]
         )
         # y label
-        fig.text(0.04, 0.5, "Activity", va="center", rotation="vertical")
+        fig.text(-0.01, 0.5, "Activity", va="center", rotation="vertical")
         fig.suptitle(f"Filtering Stages of Neuron {cellIdx} Activity Traces")
+        plt.tight_layout()
+        if save:
+            plt.savefig(f"../img/filter_traces_cell_{cellIdx}.png", bbox_inches="tight", dpi=300)
         plt.show()
 
     def update_inferred_spikes_plot(
@@ -281,6 +292,7 @@ class Visualization:
         oopsi_spikes,
         oasis_spikes,
         input_trace: np.array,
+        save: bool=False
     ) -> None:
         """
         Plot comparing the deconvolution and spike inference of the cell activity traces.
@@ -301,6 +313,8 @@ class Visualization:
             OASIS deconvolution and spike inference data
         input_trace : np.array
             Input trace of the cell
+        save : bool, optional
+            Save the plot as a .png file, by default False
         """
         start = max(int(sample_range[0] * self.fs), 0)
         end = min(int(sample_range[1] * self.fs), len(self.t) - 1)
@@ -318,20 +332,22 @@ class Visualization:
             label = 'OOPSI' if i == 0 else 'OASIS'
             if i == 0:
                 axs[0].plot(self.t[start:end], input_trace[cellIdx, start:end], color=color, label=label, alpha=alpha)
+                min_ylim.append(np.min(input_trace[cellIdx, start:end])) 
+                max_ylim.append(np.max(input_trace[cellIdx, start:end]))
             else:
                 axs[0].plot(self.t[start:end], self.dff[cellIdx, start:end], color=color, label=label, alpha=alpha)
+                min_ylim.append(np.min(self.dff[cellIdx, start:end])) 
+                max_ylim.append(np.max(self.dff[cellIdx, start:end])) 
             axs[1].plot(self.t[start:end], inferred_spikes["deconv"][cellIdx][start:end], color=color, alpha=alpha)
             axs[2].plot(self.t[start:end], inferred_spikes["spikes"][cellIdx][start:end], color=color, alpha=alpha)
             axs[3].plot(self.t[start:end], inferred_spikes["binspikes"][cellIdx][start:end], color=color, alpha=alpha)
-            min_ylim.append(np.min(input_trace[cellIdx, start:end]))
-            max_ylim.append(np.max(input_trace[cellIdx, start:end]))
-            min_ylim.append(np.min(inferred_spikes["deconv"][cellIdx, start:end]))
+            min_ylim.append(np.min(inferred_spikes["deconv"][cellIdx, start:end])) 
             max_ylim.append(np.max(inferred_spikes["deconv"][cellIdx, start:end]))
             min_ylim.append(np.min(inferred_spikes["spikes"][cellIdx, start:end]))
             max_ylim.append(np.max(inferred_spikes["spikes"][cellIdx, start:end]))
             min_ylim.append(np.min(inferred_spikes["binspikes"][cellIdx, start:end]))
             max_ylim.append(np.max(inferred_spikes["binspikes"][cellIdx, start:end]))
-        if show_oasis or show_oopsi:
+        if show_oasis != show_oopsi:
             if len(min_ylim) == 4 and len(max_ylim) == 4:
                 for i in range(4):
                     axs[i].set_ylim([min_ylim[i] - min_subs[i], max_ylim[i] + 0.1])
@@ -356,9 +372,16 @@ class Visualization:
         if show_oopsi and show_oasis:
             axs[0].legend(loc="upper left")
         plt.tight_layout()
+        if save:
+            if show_oopsi and show_oasis:
+                plt.savefig(f"../img/inferred_spikes_cell_{cellIdx}.png", dpi=300)
+            elif show_oopsi:
+                plt.savefig(f"../img/inferred_spikes_oopsi_cell_{cellIdx}.png", dpi=300)
+            elif show_oasis:
+                plt.savefig(f"../img/inferred_spikes_oasis_cell_{cellIdx}.png", dpi=300)
         plt.show()
 
-    def update_stimulus_spike_times(self, cellIdx: int, frequency: int, histogram: bool=False) -> None:
+    def update_stimulus_spike_times(self, cellIdx: int, frequency: int, save: bool=False) -> None:
         """
         Plot with the spike times of a cell per orientation and trial.
 
@@ -368,8 +391,8 @@ class Visualization:
             Index of the cell to plot
         frequency : int
             Temporal frequency of the stimulus
-        histogram : bool, optional
-            Plot a histogram of the spikes, by default False
+        save : bool, optional
+            Save the plot as a .png file, by default False
         """
         if frequency == 0.0:
             stimulus_epochs = self.stim_table[self.stim_table["blank_sweep"] == 0.0].copy()
@@ -390,120 +413,64 @@ class Visualization:
             else f"Temporal Frequency {frequency} Hz"
         )
 
-        fig, axs = plt.subplots(1, 1, figsize=(10, 6))
-        for i, ori in enumerate(self.directions):
-            cell_spike_times = self.get_cell_stimulus_spikes_to_one_range(
-                cellIdx, stimulus_epochs[stimulus_epochs["orientation"] == ori]
-            )
-            if histogram:
-                spike_bins = np.zeros(x_range)
-                for trial in cell_spike_times:
-                    bin_idx = trial[:, 0].astype(int)
-                    spike_bins[bin_idx] += 1
-                axs.bar(
-                    np.arange(x_range),
-                    spike_bins,
-                    width=1,
-                    align="edge",
-                    color='k',
-                    bottom=i * y_range
+        fig, axs = plt.subplots(1, 2, figsize=(15, 6))
+        for p in range(2):
+            for i, ori in enumerate(self.directions):
+                cell_spike_times = self.get_cell_stimulus_spikes_to_one_range(
+                    cellIdx, stimulus_epochs[stimulus_epochs["orientation"] == ori]
                 )
-                axs.set_xlim(0, x_range-1)
-                axs.set_xticks(np.linspace(0, len(stimulus_times), 9))
-                axs.set_xticklabels(np.arange(0.0, 2.25, step=0.25))
-                axs.set_title(
-                    f"Spike Density of Neuron {cellIdx} per Orientation - {freq_string}"
-                )
-            else:
-                for t, trial in enumerate(cell_spike_times):
-                    axs.scatter(
-                        stimulus_times[trial[:, 0].astype(int)],
-                        np.zeros_like(trial[:, 1]) + (i * y_range) + t + 0.5,
-                        c="k",
-                        s=2,
-                        marker="|",
+                if p == 1: # density plot
+                    spike_bins = np.zeros(x_range)
+                    for trial in cell_spike_times:
+                        bin_idx = trial[:, 0].astype(int)
+                        spike_bins[bin_idx] += 1
+                    axs[p].bar(
+                        np.arange(x_range),
+                        spike_bins,
+                        width=1,
+                        align="edge",
+                        color='k',
+                        bottom=i * y_range
                     )
-                # x-axis
-                axs.set_xlim(-0.01, 2.0)
-                axs.set_title(
-                    f"Spike Times of Neuron {cellIdx} per Orientation and Trial - {freq_string}"
+                    axs[p].set_xlim(0, x_range-1)
+                    axs[p].set_xticks(np.linspace(0, len(stimulus_times), 9))
+                    axs[p].set_xticklabels(np.arange(0.0, 2.25, step=0.25))
+                    axs[p].set_title(
+                        f"Spike Density per Orientation"
+                    )
+                else: # spike times plot
+                    for t, trial in enumerate(cell_spike_times):
+                        axs[p].scatter(
+                            stimulus_times[trial[:, 0].astype(int)],
+                            np.zeros_like(trial[:, 1]) + (i * y_range) + t + 0.5,
+                            c="k",
+                            s=2,
+                            marker="|",
+                        )
+                    # x-axis
+                    axs[p].set_xlim(-0.01, 2.0)
+                    axs[p].set_title(
+                        f"Spike Times per Orientation and Trial"
+                    )
+            axs[p].set_xlabel("Time [s]")
+            # y-axis
+            axs[p].set_ylim(0, len(self.directions) * y_range)
+            axs[p].set_yticks(np.arange(len(self.directions) * y_range, step=y_range))
+            axs[p].set_yticklabels(self.directions)
+            axs[p].grid(axis="y", alpha=0.5)
+            for tick_label in axs[p].get_yticklabels():
+                tick_label.set_transform(
+                    tick_label.get_transform()
+                    + transforms.ScaledTranslation(0, 0.3, fig.dpi_scale_trans)
                 )
-        axs.set_xlabel("Time [s]")
-
-        # y-axis
-        axs.set_ylim(0, len(self.directions) * y_range)
-        axs.set_yticks(np.arange(len(self.directions) * y_range, step=y_range))
-        axs.set_yticklabels(self.directions)
-        axs.set_ylabel("Direction [°]")
-        for tick_label in axs.get_yticklabels():
-            tick_label.set_transform(
-                tick_label.get_transform()
-                + transforms.ScaledTranslation(0, 0.3, fig.dpi_scale_trans)
-            )
-        axs.grid(axis="y", alpha=0.5)
+        axs[0].set_ylabel("Direction [°]")
+        plt.suptitle(f"Spikes of Neuron {cellIdx} During Presentation of Stimulus - {freq_string}")
+        plt.tight_layout()
+        if save:
+            plt.savefig(f"../img/stimulus_spikes_cell_{cellIdx}.png", dpi=300)
         plt.show()
 
-    def update_spikes_per_frequency(self, cellIdx: int, sample_range: list[float, float]) -> None:
-        """
-        Plot the spike times of a cell per temporal frequency.
-
-        Parameters
-        ----------
-        cellIdx : int
-            Index of the cell to plot
-        sample_range : list[float, float]
-            Range of samples to plot [a, b] in seconds
-        """
-        start = max(int(sample_range[0] * self.fs), 0)
-        end = min(int(sample_range[1] * self.fs), len(self.t) - 1)
-        y_step = len(self.frequencies) + 1
-        # create color array of y_step distinguishable colors
-        colors = plt.cm.tab10(np.arange(0, y_step))
-        fig, axs = plt.subplots(1, 1, figsize=(10, 6))
-        for i, ori in enumerate(orientations):
-            for j, freq in enumerate(self.frequencies):
-                cell_spike_times = self.get_spike_times_cell(
-                    cellIdx, ori, freq
-                )
-                cell_spike_times_in_range = cell_spike_times[
-                    (cell_spike_times[:, 0] >= start) & (cell_spike_times[:, 0] <= end)
-                ]
-                axs.scatter(
-                    self.t[cell_spike_times_in_range[:, 0].astype(int)],
-                    np.zeros_like(cell_spike_times_in_range[:, 1]) + (i * y_step) + j + 0.5,
-                    color=colors[j],
-                    s=2,
-                    marker="|",
-                    label=f"{freq} Hz" if i == 0 else "",
-                )
-
-        # x-axis
-        axs.set_xlim(self.t[start], self.t[end])
-        axs.set_xlabel("Time [s]")
-
-        # y-axis
-        axs.set_ylim(0, len(self.directions) * y_step)
-        axs.set_yticks(np.arange(len(self.directions) * y_step, step=y_step))
-        axs.set_yticklabels(self.directions)
-        axs.set_ylabel("Direction [°]")
-        for tick_label in axs.get_yticklabels():
-            tick_label.set_transform(
-                tick_label.get_transform()
-                + transforms.ScaledTranslation(0, 0.18, fig.dpi_scale_trans)
-            )
-
-        axs.set_title(f"Spike Times of Neuron {cellIdx} for Different Orientations")
-        axs.grid(axis="y", alpha=0.5)
-        # place legend outside on the right of the plot
-        plt.legend(
-            title=f" Temporal\n Frequency",
-            title_fontsize="medium",
-            loc="center left",
-            bbox_to_anchor=(1, 0.5),
-        )
-        plt.show()
-
-    def update_temporal_tuning_curve(self, cellIdx: int, temporal_tunings: np.array) -> None:
+    def update_temporal_tuning_curve(self, cellIdx: int, temporal_tunings: np.array, save: bool=False) -> None:
         """
         Plot the temporal tuning curve of a cell.
 
@@ -513,6 +480,8 @@ class Visualization:
             Index of the cell to plot
         temporal_tunings : np.array
             Temporal tuning curve of the cell
+        save : bool, optional
+            Save the plot as a .png file, by default False
         """
         x = np.arange(temporal_tunings.shape[2])
         temporal_tuning_mean = temporal_tunings[0, cellIdx, :].copy()
@@ -531,9 +500,11 @@ class Visualization:
         ax.set_xlabel("Temporal Frequency [Hz]")
         ax.set_ylabel("Mean and SD")
         ax.set_xticks(ticks=x, labels=self.frequencies)
+        if save:
+            plt.savefig(f"../img/temporal_tuning_curve_cell_{cellIdx}.png", dpi=300)
         plt.show()
 
-    def update_directional_tuning_curve(self, cellIdx: int, tuning_curve_fit: dict) -> None:
+    def update_directional_tuning_curve(self, cellIdx: int, tuning_curve_fit: dict, save: bool=False) -> None:
         """
         Plot the directional tuning curve of a cell.
 
@@ -543,6 +514,8 @@ class Visualization:
             Index of the cell to plot
         tuning_curve_fit : dict
             Fitted tuning curves of the cell
+        save : bool, optional
+            Save the plot as a .png file, by default False
         """
         fitted_curves = tuning_curve_fit[cellIdx]["fitted_curves"].copy()
         mean_spike_counts = tuning_curve_fit[cellIdx]["mean_spike_counts"].copy()
@@ -584,7 +557,7 @@ class Visualization:
                 max_curve_idx_for_all_directions[max_direction_idx], max_direction_idx
             ],
             "ro",
-            label="Preferred Orientation",
+            label="Top-2 Preferred Directions",
         )
         # remove the maximum direction from the list and get the second maximum
         fitted_curves[max_curve_idx_for_all_directions[max_direction_idx]][max_direction_idx] = 0
@@ -602,7 +575,10 @@ class Visualization:
         ax.set_xlabel("Direction [°]")
         ax.set_ylabel("Spike Count")
         ax.set_title("Tuning Curve Fit of Neuron {}".format(cellIdx))
-        ax.legend()
+        # place legend outside on the right of the plot
+        ax.legend(loc="center left", bbox_to_anchor=(1, 0.5))
+        if save:
+            plt.savefig(f"../img/directional_tuning_curve_cell_{cellIdx}.png", bbox_inches="tight", dpi=300)
         plt.show()
 
     ################################################################################################
@@ -641,7 +617,7 @@ class Visualization:
                     if data[c] == 0:
                         cell_roi *= -1
                     mask = np.where(mask == 0, cell_roi, mask)
-                tab_idx = [0, 15, 6]
+                tab_idx = [1, 15, 0]
                 colors = [get_color(i) for i in tab_idx]
                 bounds = [-1.5, -0.5, 0.5, 1.5]
                 legend_patches = [
@@ -689,7 +665,7 @@ class Visualization:
 
         cmap = ListedColormap(colors)
         norm = plt.cm.colors.BoundaryNorm(bounds, cmap.N)
-        fig, ax = plt.subplots(1, 1, figsize=(10, 10))
+        fig, ax = plt.subplots(1, 1, figsize=(8, 8))
         ax.imshow(mask, cmap=cmap, norm=norm, interpolation="none")
         ax.set_title(title)
         # set x and yticks off
@@ -715,7 +691,7 @@ class Visualization:
         """
         start = max(int(start * self.fs), 0)
         end = min(int(end * self.fs), len(self.t) - 1)
-        fig, axs = plt.subplots(1, 1, figsize=(10, 5))
+        fig, axs = plt.subplots(1, 1, figsize=(15, 5))
         axs.plot(
             self.t[start:end],
             self.running_speed[start:end],
@@ -763,7 +739,7 @@ class Visualization:
         """
         freq_strings = self.frequencies.copy()
         freq_strings.append(-1)
-        fig, axs = plt.subplots(2, 3, figsize=(10, 6))
+        fig, axs = plt.subplots(2, 3, figsize=(15, 6))
 
         for i, ax in enumerate(axs.flatten()):
             tf = freq_strings[i]
@@ -824,7 +800,7 @@ class Visualization:
                         ax.set_xlabel("p-Value")
                         ax.set_ylim(0, 60)
                     if col == 0:
-                        ax.set_ylabel("Frequency")
+                        ax.set_ylabel("Count")
                 else:
                     ax.scatter(
                         np.arange(len(df[columns[col]])),
@@ -991,7 +967,7 @@ class Visualization:
         max_abs_val = np.max(np.abs(roi_corr))
         norm = TwoSlopeNorm(vmin=-max_abs_val, vcenter=0, vmax=max_abs_val)
 
-        fig, axs = plt.subplots(1, 1, figsize=(10, 10))
+        fig, axs = plt.subplots(1, 1, figsize=(8, 8))
         im = axs.imshow(roi_corr, cmap="bwr", norm=norm, interpolation="none")
         cbar = fig.colorbar(im, ax=axs, shrink=0.8)
         cbar.set_label("Correlation Value")

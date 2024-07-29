@@ -118,7 +118,7 @@ def wiener_filter_signal(x: np.array, window: float) -> np.array:
     Returns
     -------
     y: np.ndarray, (n_samples, n_cells)
-        The filtered x. There is no filter delay as to my knowledge # TODO clarify!
+        The filtered x.
     """
     y = np.apply_along_axis(
         lambda col: signal.wiener(  # apply the filter to a column
@@ -784,7 +784,8 @@ def kolmogorovTest(
     df:pd.DataFrame(),
     df2:pd.DataFrame() = None,
     columns: list = ["p_val_1", "p_val_2", "p_val_4", "p_val_8", "p_val_15", "p_val_-1"],
-    base_column: str = "p_val_-1"
+    base_column: str = "p_val_-1",
+    direction: bool = False
 ) -> pd.DataFrame():
     """
     Perform the Kolmogorov-Smirnov test for each pair of distributions.
@@ -825,8 +826,9 @@ def kolmogorovTest(
                 }
             )
     results_df = pd.DataFrame(results)
+    ordir_string = "Direction" if direction else "Orientation"
     print("----------------------------------------------------")
-    print("Significance Testing for Orientational Tuned Neurons")
+    print(f"Significance Testing for {ordir_string} Tuned Neurons")
     print("----------------------------------------------------")
     print(results_df)
     print("----------------------------------------------------")
